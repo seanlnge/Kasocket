@@ -13,6 +13,7 @@ class Client {
     public: any;
     private: any;
     clients: Map<string, { [key: string]: any }>;
+    ready: boolean = false;
     
     /**
      * Connect the client to the Kasocket websocket server
@@ -96,6 +97,7 @@ class Client {
 
         // Create proxies for initialized client data
         else if(operation.operation == 'init') {
+            this.ready = true;
             this.id = operation.id;
             for(const clientID in operation.clients) {
                 this.clients.set(clientID, Proxybox(operation.clients[clientID]));

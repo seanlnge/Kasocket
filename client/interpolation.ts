@@ -36,7 +36,9 @@ export class Interpolator {
 export function Proxybox (obj: { [key: string]: any }): { [key: string]: any } {
     const box = {};
     for(const prop in obj) {
-        if(typeof obj[prop] == 'object') {
+        if(Array.isArray(obj[prop])) {
+            box[prop] = obj[prop];
+        } else if(typeof obj[prop] == 'object') {
             box[prop] = Proxybox(obj[prop]);
         } else {
             box[prop] = obj[prop];
