@@ -2806,6 +2806,13 @@ var ClientObject = class {
     this.public = data.public;
     this.private = data.private;
   }
+  sendMessage(name, data) {
+    const message = Message.toString(name, data);
+    this.ws.send(message, (err) => {
+      if (err)
+        throw err;
+    });
+  }
 };
 __name(ClientObject, "ClientObject");
 var InitialClientData = {
@@ -2834,7 +2841,6 @@ var Server = class {
       for (const [clientID, clientObj] of this.clients) {
         parsedClients[clientID] = clientObj.public;
       }
-      console.log(parsedClients, InitialClientData);
       this.addOperation(Initialize({
         time: Date.now(),
         id,

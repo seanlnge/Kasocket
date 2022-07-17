@@ -241,7 +241,7 @@ const connect = ({
     url = `wss://${window.location.hostname}`,
     path = '/multiplayer',
     kaboom = window as unknown as KaboomCtx
-}: ClientOptions) => {
+}: ClientOptions = {} as ClientOptions) => {
     const ClientObject = new Client({ global, url, path, kaboom });
     return {
         Public: ClientObject.public,
