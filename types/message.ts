@@ -9,9 +9,9 @@ export default class Message {
         this.time = Date.now();
     }
 
-    static bundleOperations(operations: { [key: string]: any }[] | { [key: string]: any }) {
+    static bundleOperations(deltaTime: number, operations: { [key: string]: any }[] | { [key: string]: any }) {
         if(!Array.isArray(operations)) operations = [operations];
-        return JSON.stringify(new Message('_', operations));
+        return JSON.stringify(new Message('_', { operations, deltaTime }));
     }
 
     static fromString(str: string) {

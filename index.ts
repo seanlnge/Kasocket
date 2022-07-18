@@ -51,6 +51,8 @@ export class Server {
     clientUpdates: Map<string, Operation[]> = new Map(); // Map<clientID, indexes in `updates` of updates to send to this client>
 
     updateInterval: NodeJS.Timer;
+    lastFrame: number = Date.now();
+    deltaTime: number = 0;
 
     /**
      * Initialize and create Kasocket server object
@@ -65,16 +67,16 @@ export class Server {
     }: ServerOptions = {} as ServerOptions) {
         this.socket = new WebSocketServer({ server, path });
 
-        // "but but but type safety!!11!!1" -🤓
+        // "ws: Websocket & { id: string }? but but but type safety!!11!!1" -🤓
         this.socket.on('connection', (ws: WebSocket & { id: string }) => {
             // Verify no other clients have `pid` before mutating `ws`
             let id: string = '';
-            while(!id || this.clients.has(id)) {
-                id = Math.floor(Math.random()*uuidMax).toString(16);
-            }
+            while(!id || this.clients.has(id)) id = Math.floor(Math.random()*uuidMax).toString(16);
             ws.id = id;
 
+            // Create and initialize new client
             const client = new ClientObject(ws, id, InitialClientData);
+            this.applyMutationProxy(client);
             this.clients.set(id, client);
 
             // Create object containing only public data from all clients
@@ -118,11 +120,63 @@ export class Server {
                         this.handleOperation(operation, ws.id, Date.now());
                     }
                 }
+                
+                // Call event listeners
+                const eventList = this.events.get(message.name);
+                if(!eventList) return;
+
+                for(const event of eventList) {
+                    event(message.data, this.clients.get(ws.id));
+                }
             });
         });
 
         this.updateInterval = setInterval(() => this.update(), 1000/tps);
 	}
+
+    /**
+     * Create event listener for named messages
+     * @param name Message name identifier to listen to
+     * @param callback Function to call on message receive
+     */
+    on(name: string, callback: ((data: any, client?: ClientObject) => void)) {
+        const eventList = this.events.get(name);
+        if(!eventList) {
+            this.events.set(name, [callback]);
+        } else {
+            eventList.push(callback);
+        }
+    }
+
+    /**
+     * Send a message to a specific client
+     * @param clientID ID of client to send message to
+     * @param name Message name identifier
+     * @param data Data to send to client
+     */
+    sendMessage(clientID: string, name: string, data: any) {
+        const client = this.clients.get(clientID);
+        if(!client) throw new ReferenceError(`Client '${clientID}' does not exist!`);
+
+        const message = Message.toString(name, data);
+        client.ws.send(message, err => { if(err) throw err });
+    }
+
+    /**
+     * Send a message to all listening clients
+     * @param name Client-side identifier for listening to message
+     * @param data Data to send to clients
+     */
+    broadcast(name: string, data: any) {
+        if(name == '_') {
+            throw new Error(`Websocket messages named '_' are reserved for native Kasocket operations`);
+        }
+
+        const message = Message.toString(name, data);
+        for(const client of this.clients.values()) {
+            client.ws.send(message);
+        }
+    }
 
     /**
      * Handle a Kasocket reserved operation
@@ -192,14 +246,17 @@ export class Server {
                 if(op.id != operation.id) continue;
                 if(op.operation != operation.operation) continue;
 
-                // If mutating, verify everything is same 
+                // If mutating, verify same object being mutated
                 if(op.operation == 'mut') {
                     const nop = operation as ClientMutation;
                     if(op.instruction != nop.instruction) continue;
                     if(op.path.length != nop.path.length) continue;
                     if(op.property != nop.property) continue;
                     if(op.path.some((v, i) => nop.path[i] != v)) continue;
-                } else if(op.operation == 'cre') {
+                }
+                
+                // If creating client, verify that they're not already being created
+                else if(op.operation == 'cre') {
                     const nop = operation as ClientCreation;
                     if(op.client != nop.client) continue;
                 }
@@ -214,55 +271,51 @@ export class Server {
      * Send all unsent updates to clients, runs `tps` times a second by default
      */
     update() {
+        this.deltaTime = (Date.now() - this.lastFrame) / 1000;
+        this.lastFrame = Date.now();
+
         for(const [id, client] of this.clients) {
             let updateArr = this.clientUpdates.get(id);
-            if(!updateArr) continue;
-            client.ws.send(Message.bundleOperations(updateArr));
+            //if(!updateArr) continue;
+            client.ws.send(Message.bundleOperations(this.deltaTime, updateArr || []));
         }
         this.clientUpdates = new Map();
     }
 
     /**
-     * Create event listener for named messages
-     * @param name Message name identifier to listen to
-     * @param callback Function to call on message receive
+     * Apply proxy for mutations that sends appropriate operation to clients
+     * @param client Client object to apply mutation proxies to
      */
-    onMessage(name: string, callback: ((data: any, client?: ClientObject) => void)) {
-        const eventList = this.events.get(name);
-        if(!eventList) {
-            this.events.set(name, [callback]);
-        } else {
-            eventList.push(callback);
-        }
-    }
+    private applyMutationProxy(client: ClientObject) {
+        const t = this;
 
-    /**
-     * Send a message to a specific client
-     * @param clientID ID of client to send message to
-     * @param name Message name identifier
-     * @param data Data to send to client
-     */
-    sendMessage(clientID: string, name: string, data: any) {
-        const client = this.clients.get(clientID);
-        if(!client) throw new ReferenceError(`Client '${clientID}' does not exist!`);
+        function recurseProxy(
+            obj: { [key: string]: any },
+            instance: 'public' | 'private',
+            path: string[]
+        ): { [key: string]: any } {
+            return new Proxy(obj, {
+                set(object, property: string, value) {
+                    object[property] = value;
 
-        const message = Message.toString(name, data);
-        client.ws.send(message, err => { if(err) throw err });
-    }
+                    t.addOperation(MutateClient({
+                        id: client.id,
+                        path,
+                        instruction: 'set',
+                        property,
+                        value,
+                        time: Date.now(),
+                    }), instance == 'private' ? {
+                        clusivity: 'include',
+                        users: new Set([client.id])
+                    } : undefined);
 
-    /**
-     * Send a message to all listening clients
-     * @param name Client-side identifier for listening to message
-     * @param data Data to send to clients
-     */
-    broadcast(name: string, data: any) {
-        if(name == '_') {
-            throw new Error(`Websocket messages named '_' are reserved for native Kasocket operations`);
+                    return true;
+                }
+            });
         }
 
-        const message = Message.toString(name, data);
-        for(const client of this.clients.values()) {
-            client.ws.send(message);
-        }
+        client.public = recurseProxy(client.public, 'public', []);
+        client.private = recurseProxy(client.private, 'private', []);
     }
 };

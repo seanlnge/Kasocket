@@ -45,10 +45,10 @@ var Message = class {
     this.data = data;
     this.time = Date.now();
   }
-  static bundleOperations(operations) {
+  static bundleOperations(deltaTime, operations) {
     if (!Array.isArray(operations))
       operations = [operations];
-    return JSON.stringify(new Message("_", operations));
+    return JSON.stringify(new Message("_", { operations, deltaTime }));
   }
   static fromString(str) {
     const parsed = JSON.parse(str);
@@ -61,20 +61,27 @@ var Message = class {
 __name(Message, "Message");
 
 // kasocket/client/interpolation.ts
-var timer = Date.now();
 var Interpolator = class {
   constructor(method, initial) {
-    this.timeline = [{ value: initial, sent: Date.now(), received: Date.now() }];
+    this.offset = 200;
+    this.timeline = [{ value: initial, received: Date.now(), deltaTime: 50 }];
     this.current = this.timeline[0].value;
     this.method = method;
   }
   get value() {
-    if (!this.timeline[1])
+    if (this.timeline.length == 1)
       return this.timeline[0].value;
-    return this.method(this.current, this.timeline[1].value, Math.min(1, Math.max(0, (Date.now() - this.timeline[0].received) / (this.timeline[0].sent - this.timeline[1].sent))));
+    const firstNeg = this.timeline.findIndex((x) => x.received < Date.now() - this.offset);
+    if (firstNeg <= 0)
+      return this.timeline[0].value;
+    const tilUpdate = this.timeline[firstNeg - 1].received - Date.now() + this.offset;
+    const fromLastDelta = this.timeline[firstNeg - 1].deltaTime - tilUpdate;
+    if (fromLastDelta < 0)
+      return this.timeline[firstNeg].value;
+    return this.method(this.timeline[firstNeg - 1].value, this.timeline[firstNeg].value, fromLastDelta / this.timeline[firstNeg - 1].deltaTime);
   }
-  update(value, sent) {
-    this.timeline.unshift({ value, sent, received: Date.now() });
+  update(value, deltaTime) {
+    this.timeline.unshift({ value, received: Date.now(), deltaTime });
     if (this.timeline.length > 10)
       this.timeline.pop();
     this.current = value;
@@ -84,6 +91,14 @@ var Interpolator = class {
   }
 };
 __name(Interpolator, "Interpolator");
+var Update = class {
+  constructor(value, time, deltaTime) {
+    this.value = value;
+    this.time = time;
+    this.deltaTime = deltaTime;
+  }
+};
+__name(Update, "Update");
 function Proxybox(obj) {
   const box = {};
   for (const prop in obj) {
@@ -101,13 +116,11 @@ function Proxybox(obj) {
         return storer;
       },
       set(value) {
-        if (typeof value !== "object")
-          throw new Error("bruh");
+        if (!(value instanceof Update))
+          storer = value;
         if (storer instanceof Interpolator) {
-          return storer.update(value.value, value.time);
-        }
-        if (value instanceof Interpolator) {
-          return storer = value;
+          console.log(value);
+          return storer.update(value.value, value.deltaTime);
         }
         storer = value.value;
       }
@@ -126,6 +139,9 @@ var Client = class {
     kaboom = window
   } = {}) {
     this.events = {};
+    this.ready = false;
+    this.lastUpdate = 0;
+    this.deltaTime = 0;
     this.ctx = kaboom;
     this.clients = /* @__PURE__ */ new Map();
     this.ws = new WebSocket(url + path);
@@ -136,7 +152,9 @@ var Client = class {
       if (Date.now() - message.time > 1e3)
         return;
       if (message.name == "_") {
-        for (const operation of message.data) {
+        this.deltaTime = Date.now() - this.lastUpdate;
+        this.lastUpdate = Date.now();
+        for (const operation of message.data.operations) {
           console.log(operation);
           this.HandleOperation(operation);
         }
@@ -149,9 +167,6 @@ var Client = class {
     };
     if (global) {
       window["Self"] = this;
-      window["Clients"] = this.clients;
-      window["Public"] = this.public;
-      window["Private"] = this.private;
       window["Interpolator"] = Interpolator;
     }
   }
@@ -165,7 +180,7 @@ var Client = class {
         object = object[p];
       switch (operation.instruction) {
         case "set":
-          return object[operation.property] = { value: operation.value, time: operation.time };
+          return object[operation.property] = new Update(operation.value, operation.time, this.deltaTime);
         case "delete":
           return delete object[operation.property];
         default:
@@ -174,6 +189,7 @@ var Client = class {
     } else if (operation.operation == "cre") {
       this.clients.set(operation.id, Proxybox(operation.client));
     } else if (operation.operation == "init") {
+      this.ready = true;
       this.id = operation.id;
       for (const clientID in operation.clients) {
         this.clients.set(clientID, Proxybox(operation.clients[clientID]));
@@ -184,7 +200,7 @@ var Client = class {
     } else
       throw new Error(`That is not a valid operation`);
   }
-  onMessage(type, callback) {
+  on(type, callback) {
     let index;
     if (type in this.events) {
       index = this.events[type].length;
@@ -201,7 +217,7 @@ var Client = class {
       }
     };
   }
-  sendMessage(type, data) {
+  send(type, data) {
     this.ws.send(Message.toString(type, data));
   }
   CreateMutationProxy(instance, proxied) {
@@ -209,7 +225,7 @@ var Client = class {
     function recursiveProxy(object, path) {
       return new Proxy(object, {
         get(object2, property) {
-          if (typeof object2[property] != "object" || object2[property] == null) {
+          if (typeof object2[property] != "object" || Array.isArray(object2[property]) || object2[property] == null) {
             return object2[property];
           }
           return recursiveProxy(object2, [...path, property]);
@@ -227,7 +243,7 @@ var Client = class {
             throw new ReferenceError(`Data does not exist`);
           data[property] = { value, time: Date.now() };
           object2[property] = value;
-          t.ws.send(Message.bundleOperations({
+          t.ws.send(Message.bundleOperations(this.deltaTime, {
             operation: "mut_cli",
             instruction: "set",
             instance,
@@ -248,7 +264,7 @@ var Client = class {
             data = data[p];
           delete data[property];
           delete object2[property];
-          t.ws.send(Message.bundleOperations({
+          t.ws.send(Message.bundleOperations(this.deltaTime, {
             operation: "mut_cli",
             instruction: "delete",
             instance,
@@ -272,14 +288,14 @@ var connect = /* @__PURE__ */ __name(({
   url = `wss://${window.location.hostname}`,
   path = "/multiplayer",
   kaboom = window
-}) => {
+} = {}) => {
   const ClientObject = new Client({ global, url, path, kaboom });
   return {
     Public: ClientObject.public,
     Private: ClientObject.private,
     Clients: ClientObject.clients,
-    OnMessage: ClientObject.onMessage,
-    SendMessage: ClientObject.sendMessage
+    OnMessage: ClientObject.on,
+    SendMessage: ClientObject.send
   };
 }, "connect");
 var client_default = { Client, connect };

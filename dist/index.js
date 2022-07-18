@@ -2769,10 +2769,10 @@ var Message = class {
     this.data = data;
     this.time = Date.now();
   }
-  static bundleOperations(operations) {
+  static bundleOperations(deltaTime, operations) {
     if (!Array.isArray(operations))
       operations = [operations];
-    return JSON.stringify(new Message("_", operations));
+    return JSON.stringify(new Message("_", { operations, deltaTime }));
   }
   static fromString(str) {
     const parsed = JSON.parse(str);
@@ -2828,14 +2828,16 @@ var Server = class {
     this.clients = /* @__PURE__ */ new Map();
     this.events = /* @__PURE__ */ new Map();
     this.clientUpdates = /* @__PURE__ */ new Map();
+    this.lastFrame = Date.now();
+    this.deltaTime = 0;
     this.socket = new import_websocket_server.default({ server, path });
     this.socket.on("connection", (ws) => {
       let id = "";
-      while (!id || this.clients.has(id)) {
+      while (!id || this.clients.has(id))
         id = Math.floor(Math.random() * uuidMax).toString(16);
-      }
       ws.id = id;
       const client = new ClientObject(ws, id, InitialClientData);
+      this.applyMutationProxy(client);
       this.clients.set(id, client);
       const parsedClients = {};
       for (const [clientID, clientObj] of this.clients) {
@@ -2870,9 +2872,42 @@ var Server = class {
             this.handleOperation(operation, ws.id, Date.now());
           }
         }
+        const eventList = this.events.get(message.name);
+        if (!eventList)
+          return;
+        for (const event of eventList) {
+          event(message.data, this.clients.get(ws.id));
+        }
       });
     });
     this.updateInterval = setInterval(() => this.update(), 1e3 / tps);
+  }
+  on(name, callback) {
+    const eventList = this.events.get(name);
+    if (!eventList) {
+      this.events.set(name, [callback]);
+    } else {
+      eventList.push(callback);
+    }
+  }
+  sendMessage(clientID, name, data) {
+    const client = this.clients.get(clientID);
+    if (!client)
+      throw new ReferenceError(`Client '${clientID}' does not exist!`);
+    const message = Message.toString(name, data);
+    client.ws.send(message, (err) => {
+      if (err)
+        throw err;
+    });
+  }
+  broadcast(name, data) {
+    if (name == "_") {
+      throw new Error(`Websocket messages named '_' are reserved for native Kasocket operations`);
+    }
+    const message = Message.toString(name, data);
+    for (const client of this.clients.values()) {
+      client.ws.send(message);
+    }
   }
   handleOperation(data, senderID, time) {
     if (data.operation == "mut_cli") {
@@ -2943,40 +2978,38 @@ var Server = class {
     }
   }
   update() {
+    this.deltaTime = (Date.now() - this.lastFrame) / 1e3;
+    this.lastFrame = Date.now();
     for (const [id, client] of this.clients) {
       let updateArr = this.clientUpdates.get(id);
-      if (!updateArr)
-        continue;
-      client.ws.send(Message.bundleOperations(updateArr));
+      client.ws.send(Message.bundleOperations(this.deltaTime, updateArr || []));
     }
     this.clientUpdates = /* @__PURE__ */ new Map();
   }
-  onMessage(name, callback) {
-    const eventList = this.events.get(name);
-    if (!eventList) {
-      this.events.set(name, [callback]);
-    } else {
-      eventList.push(callback);
+  applyMutationProxy(client) {
+    const t = this;
+    function recurseProxy(obj, instance, path) {
+      return new Proxy(obj, {
+        set(object, property, value) {
+          object[property] = value;
+          t.addOperation(MutateClient({
+            id: client.id,
+            path,
+            instruction: "set",
+            property,
+            value,
+            time: Date.now()
+          }), instance == "private" ? {
+            clusivity: "include",
+            users: /* @__PURE__ */ new Set([client.id])
+          } : void 0);
+          return true;
+        }
+      });
     }
-  }
-  sendMessage(clientID, name, data) {
-    const client = this.clients.get(clientID);
-    if (!client)
-      throw new ReferenceError(`Client '${clientID}' does not exist!`);
-    const message = Message.toString(name, data);
-    client.ws.send(message, (err) => {
-      if (err)
-        throw err;
-    });
-  }
-  broadcast(name, data) {
-    if (name == "_") {
-      throw new Error(`Websocket messages named '_' are reserved for native Kasocket operations`);
-    }
-    const message = Message.toString(name, data);
-    for (const client of this.clients.values()) {
-      client.ws.send(message);
-    }
+    __name(recurseProxy, "recurseProxy");
+    client.public = recurseProxy(client.public, "public", []);
+    client.private = recurseProxy(client.private, "private", []);
   }
 };
 __name(Server, "Server");

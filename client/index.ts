@@ -2,7 +2,7 @@ import { KaboomCtx } from 'kaboom';
 import Message from '../types/message';
 import { ClientOptions } from '../types/options';
 import { Operation } from '../types/operation';
-import { Proxybox, Interpolator } from './interpolation';
+import { Proxybox, Interpolator, Update } from './interpolation';
 
 class Client {
     private ctx: KaboomCtx;
@@ -14,6 +14,9 @@ class Client {
     private: any;
     clients: Map<string, { [key: string]: any }>;
     ready: boolean = false;
+
+    lastUpdate: number = 0;
+    deltaTime: number = 0;
     
     /**
      * Connect the client to the Kasocket websocket server
@@ -42,7 +45,10 @@ class Client {
             
             // Handle websocket updates
             if(message.name == '_') {
-                for(const operation of message.data as Operation[]) {
+                this.deltaTime = (Date.now() - this.lastUpdate) / 1000;
+                this.lastUpdate = Date.now();
+
+                for(const operation of message.data.operations as Operation[]) {
                     console.log(operation);
                     this.HandleOperation(operation);
                 }
@@ -59,10 +65,6 @@ class Client {
         // Set globals
         if(global) {
             window['Self'] = this;
-            window['Clients'] = this.clients;
-            window['Public'] = this.public;
-            window['Private'] = this.private;
-
             window['Interpolator'] = Interpolator;
         }
     }
@@ -83,7 +85,11 @@ class Client {
             for(const p of operation.path) object = object[p];
 
             switch(operation.instruction) {
-                case 'set': return object[operation.property] = { value: operation.value, time: operation.time };
+                case 'set': return object[operation.property] = new Update(
+                    operation.value,
+                    operation.time,
+                    this.deltaTime
+                );
                 case 'delete': return delete object[operation.property];
 
                 default: throw new ReferenceError(`'${operation.instruction}' is not a valid client mutation instruction`);
@@ -125,7 +131,7 @@ class Client {
      * @param callback - Called when `type` sent from server
      * @returns Handler for this event
      */
-    onMessage(type: string, callback: ((data: any) => void)) {
+    on(type: string, callback: ((data: any) => void)) {
         let index: number;
         if(type in this.events) {
             index = this.events[type].length;
@@ -143,7 +149,7 @@ class Client {
         }
     }
 
-    sendMessage(type: string, data: any) {
+    send(type: string, data: any) {
         this.ws.send(Message.toString(type, data));
     }
 
@@ -152,7 +158,7 @@ class Client {
      * @param instance Client data instance to watch for mutations
      * @returns Proxied object
      */
-    private CreateMutationProxy(instance: string, proxied: { [key: string]: any }) {
+     private CreateMutationProxy(instance: string, proxied: { [key: string]: any }) {
         const t = this; // Allow inner scopes to use `ws`, `id`, and `clients`
         
         // Needs to be recursive for nested objects; Property list left to right
@@ -161,7 +167,7 @@ class Client {
             return new Proxy(object, {
                 // Recurse until all objects proxied
                 get(object: any, property: any) {
-                    if(typeof object[property] != "object" || object[property] == null) {
+                    if(typeof object[property] != "object" || Array.isArray(object[property]) || object[property] == null) {
                         return object[property];
                     }
 
@@ -183,11 +189,11 @@ class Client {
                     if(!data) throw new ReferenceError(`Data does not exist`);
 
                     // Edit value in list of clients
-                    data[property] = { value, time: Date.now() };
+                    data[property] = { value, time: Date.now(), deltaTime: this.deltaTime };
                     object[property] = value;
                     
                     // Send changes to server
-                    t.ws.send(Message.bundleOperations({
+                    t.ws.send(Message.bundleOperations(this.deltaTime, {
                         operation: 'mut_cli',
                         instruction: 'set',
                         instance,
@@ -214,7 +220,7 @@ class Client {
                     delete object[property];
 
                     // Send changes to server
-                    t.ws.send(Message.bundleOperations({
+                    t.ws.send(Message.bundleOperations(this.deltaTime, {
                         operation: 'mut_cli',
                         instruction: 'delete',
                         instance,
@@ -249,8 +255,8 @@ const connect = ({
         Public: ClientObject.public,
         Private: ClientObject.private,
         Clients: ClientObject.clients,
-        OnMessage: ClientObject.onMessage,
-        SendMessage: ClientObject.sendMessage
+        OnMessage: ClientObject.on,
+        SendMessage: ClientObject.send
     }
 }
 
