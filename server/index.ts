@@ -1,30 +1,27 @@
+import util from 'util';
 import { WebSocket, WebSocketServer } from 'ws';
-import { ServerOptions } from './types/options';
-import Message from './types/message';
-import { Operation, MutateClient, CreateClient, Initialize, ClientMutation, ClientCreation } from './types/operation';
+import { KaboomObject } from './kaboom/index';
+import Message from '../message';
+import { Operation, MutateClient, CreateClient, Initialize, ClientMutation, ClientCreation } from '../operation';
+import { Classify } from './clientInterface';
+export { Kaboom } from './kaboom/index';
+
+import NanoTimer from 'nanotimer';
 
 class ClientObject {
     ws: WebSocket;
     id: string;
+    
+    // Not a Map because of JSON performance drawbacks plus ease of adaptability for dx
     public: { [key: string]: any } = {};
     private: { [key: string]: any } = {};
 
     constructor(
         ws: WebSocket,
         id: string,
-
-        // Not a Map because of JSON performance drawbacks
-        data: {
-            public: { [key: string]: any }
-            private: { [key: string]: any }
-        }
     ) {
-        data = JSON.parse(JSON.stringify(data));
-
         this.ws = ws;
         this.id = id;
-        this.public = data.public;
-        this.private = data.private;
     }
 
     /**
@@ -33,15 +30,10 @@ class ClientObject {
      * @param data Data to send to client
      */
     sendMessage(name: string, data: any) {
-        const message = Message.toString(name, data);
+        const message = Message.Create(name, data);
         this.ws.send(message, err => { if(err) throw err });
     }
 }
-
-export const InitialClientData = {
-    public: {},
-    private: {}
-};
 
 export class Server {
     socket: WebSocketServer;
@@ -49,6 +41,8 @@ export class Server {
 
     events: Map<string, ((data: any, client?: ClientObject) => void)[]> = new Map();
     clientUpdates: Map<string, Operation[]> = new Map(); // Map<clientID, indexes in `updates` of updates to send to this client>
+    connectionEvent: ((client: ClientObject) => void);
+    updateEvent: (() => void);
 
     updateInterval: NodeJS.Timer;
     lastFrame: number = Date.now();
@@ -64,25 +58,22 @@ export class Server {
         path = '/multiplayer',
         uuidMax = 0xffffffff,
         tps = 20
-    }: ServerOptions = {} as ServerOptions) {
+    } = {}) {
         this.socket = new WebSocketServer({ server, path });
 
-        // "ws: Websocket & { id: string }? but but but type safety!!11!!1" -🤓
-        this.socket.on('connection', (ws: WebSocket & { id: string }) => {
-            // Verify no other clients have `pid` before mutating `ws`
+        this.socket.on('connection', (ws: WebSocket) => {
             let id: string = '';
             while(!id || this.clients.has(id)) id = Math.floor(Math.random()*uuidMax).toString(16);
-            ws.id = id;
-
-            // Create and initialize new client
-            const client = new ClientObject(ws, id, InitialClientData);
+            const client = new ClientObject(ws, id);
+            
+            // Apply proxy to listen for mutations to client data instances
             this.applyMutationProxy(client);
             this.clients.set(id, client);
 
             // Create object containing only public data from all clients
             const parsedClients: { [key: string]: ClientObject['public'] } = {};
             for(const [clientID, clientObj] of this.clients) {
-                parsedClients[clientID] = clientObj.public;
+                parsedClients[clientID] = Classify(clientObj.public);
             }
 
             // Send connecting user their data
@@ -91,8 +82,8 @@ export class Server {
                 id,
                 clients: parsedClients,
                 clientData: {
-                    public: client.public,
-                    private: client.private
+                    public: Classify(client.public),
+                    private: Classify(client.private)
                 }
             }), {
                 clusivity: 'include',
@@ -103,21 +94,26 @@ export class Server {
             this.addOperation(CreateClient({
                 time: Date.now(),
                 id,
-                client: client.public
+                client: Classify(client.public)
             }), {
                 clusivity: 'exclude',
                 users: new Set([id])
             });
 
+            // Run connection event
+            if(this.connectionEvent) {
+                this.connectionEvent(client);
+            }
+
             // Call events and handle messages
             ws.on('message', (msgStr: string) => {
-                const message = Message.fromString(msgStr);
+                const message = Message.Parse(msgStr);
                 if(Date.now() - message.time > 3000) return; // Timed out
 
                 // Messages named with an underscore are reserved for native Kasocket purposes
                 if(message.name == '_') {
-                    for(const operation of message.data) {
-                        this.handleOperation(operation, ws.id, Date.now());
+                    for(const operation of message.data.operations) {
+                        this.handleOperation(operation, id, Date.now());
                     }
                 }
                 
@@ -126,13 +122,29 @@ export class Server {
                 if(!eventList) return;
 
                 for(const event of eventList) {
-                    event(message.data, this.clients.get(ws.id));
+                    event(message.data, this.clients.get(id));
                 }
             });
         });
 
-        this.updateInterval = setInterval(() => this.update(), 1000/tps);
+        (new NanoTimer()).setInterval(this.update.bind(this), [], '50m')
 	}
+
+    /**
+     * Create event listener for client connection
+     * @param callback Function to call on client connection
+     */
+    onConnect(callback: ((client: ClientObject) => void)) {
+        this.connectionEvent = callback;
+    }
+
+    /**
+     * Create event listener for Kasocket update
+     * @param callback Function to call on Kasocket update
+     */
+    onUpdate(callback: (() => void)) {
+        this.updateEvent = callback;
+    }
 
     /**
      * Create event listener for named messages
@@ -158,7 +170,7 @@ export class Server {
         const client = this.clients.get(clientID);
         if(!client) throw new ReferenceError(`Client '${clientID}' does not exist!`);
 
-        const message = Message.toString(name, data);
+        const message = Message.Create(name, data);
         client.ws.send(message, err => { if(err) throw err });
     }
 
@@ -172,7 +184,7 @@ export class Server {
             throw new Error(`Websocket messages named '_' are reserved for native Kasocket operations`);
         }
 
-        const message = Message.toString(name, data);
+        const message = Message.Create(name, data);
         for(const client of this.clients.values()) {
             client.ws.send(message);
         }
@@ -189,7 +201,7 @@ export class Server {
             // Get object to mutate
             const client = this.clients.get(senderID);
             if(!client) throw new ReferenceError(`Client ${senderID} does not exist`);
-            let obj = client.public;
+            let obj = client[data.instance];
             for(const prop of data.path) obj = obj[prop];
 
             // Mutate server variables
@@ -197,14 +209,15 @@ export class Server {
             if(data.instruction == 'delete') delete obj[data.property];
 
             // Add mutations to update queue
-            if(data.instance === 'private') return;
+            if(data.instance != 'public') return;
             return this.addOperation(MutateClient({
                 time,
                 id: senderID,
                 instruction: data.instruction,
+                instance: 'public',
                 path: data.path,
                 property: data.property, 
-                value: data.value
+                value: Classify(data.value)
             }), {
                 clusivity: 'exclude',
                 users: new Set([senderID])
@@ -273,11 +286,13 @@ export class Server {
     update() {
         this.deltaTime = (Date.now() - this.lastFrame) / 1000;
         this.lastFrame = Date.now();
+        console.log(this.deltaTime)
+        this.updateEvent();
 
         for(const [id, client] of this.clients) {
             let updateArr = this.clientUpdates.get(id);
             //if(!updateArr) continue;
-            client.ws.send(Message.bundleOperations(this.deltaTime, updateArr || []));
+            client.ws.send(Message.BundleOperations(this.deltaTime, updateArr || []));
         }
         this.clientUpdates = new Map();
     }
@@ -295,6 +310,39 @@ export class Server {
             path: string[]
         ): { [key: string]: any } {
             return new Proxy(obj, {
+                // Recurse until all objects proxied
+                get(object: any, property: any) {
+                    if(property == '__isProxy') return true;
+
+                    if(object instanceof KaboomObject) {
+                        // Needed properties for classifying data to send to client
+                        if(property == '__functionName'
+                        || property == '__arguments'
+                        || property == '__properties') {
+                            return object[property];
+                        }
+
+                        // Use kaboom object as interface to get properties of object
+                        if(!util.types.isProxy(object.__properties)) {
+                            object.__properties = recurseProxy(object.__properties, instance, path);
+                        }
+                        return object.__properties[property];
+                    }
+
+
+                    // If not object, don't create proxy
+                    if(typeof object[property] != 'object' || object[property] === null) {
+                        return object[property];
+                    }
+
+                    // Don't recreate proxy if it already exists
+                    if(util.types.isProxy(object)) return object[property];
+                    
+                    // Create a proxy for nested objects
+                    return recurseProxy(object[property], instance, [...path, property]);
+                },
+
+                // `client.public.x = 3`
                 set(object, property: string, value) {
                     object[property] = value;
 
@@ -302,8 +350,28 @@ export class Server {
                         id: client.id,
                         path,
                         instruction: 'set',
+                        instance,
                         property,
-                        value,
+                        value: Classify(value),
+                        time: Date.now(),
+                    }), instance == 'private' ? {
+                        clusivity: 'include',
+                        users: new Set([client.id])
+                    } : undefined);
+
+                    return true;
+                },
+
+                // `delete client.public.bullets`
+                deleteProperty(object, property: string) {
+                    delete object[property];
+
+                    t.addOperation(MutateClient({
+                        id: client.id,
+                        path,
+                        instruction: 'delete',
+                        instance,
+                        property,
                         time: Date.now(),
                     }), instance == 'private' ? {
                         clusivity: 'include',

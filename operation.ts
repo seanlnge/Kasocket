@@ -14,6 +14,7 @@ export type ClientMutation = {
     operation: 'mut';
     id: string;
     instruction: 'set' | 'define' | 'delete';
+    instance: 'public' | 'private';
     path: string[];
     property: string;
     value?: any;

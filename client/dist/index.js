@@ -38,97 +38,122 @@ __export(client_exports, {
 });
 module.exports = __toCommonJS(client_exports);
 
-// kasocket/types/message.ts
+// kasocket/message.ts
 var Message = class {
   constructor(name, data) {
     this.name = name;
     this.data = data;
     this.time = Date.now();
   }
-  static bundleOperations(deltaTime, operations) {
+  static BundleOperations(deltaTime, operations) {
     if (!Array.isArray(operations))
       operations = [operations];
     return JSON.stringify(new Message("_", { operations, deltaTime }));
   }
-  static fromString(str) {
+  static Parse(str) {
     const parsed = JSON.parse(str);
     return new Message(parsed.name, parsed.data);
   }
-  static toString(name, data) {
+  static Create(name, data) {
     return JSON.stringify(new Message(name, data));
   }
 };
 __name(Message, "Message");
 
 // kasocket/client/interpolation.ts
-var Interpolator = class {
-  constructor(method, initial) {
-    this.offset = 200;
-    this.timeline = [{ value: initial, received: Date.now(), deltaTime: 50 }];
-    this.current = this.timeline[0].value;
-    this.method = method;
-  }
-  get value() {
-    if (this.timeline.length == 1)
-      return this.timeline[0].value;
-    const firstNeg = this.timeline.findIndex((x) => x.received < Date.now() - this.offset);
-    if (firstNeg <= 0)
-      return this.timeline[0].value;
-    const tilUpdate = this.timeline[firstNeg - 1].received - Date.now() + this.offset;
-    const fromLastDelta = this.timeline[firstNeg - 1].deltaTime - tilUpdate;
-    if (fromLastDelta < 0)
-      return this.timeline[firstNeg].value;
-    return this.method(this.timeline[firstNeg - 1].value, this.timeline[firstNeg].value, fromLastDelta / this.timeline[firstNeg - 1].deltaTime);
-  }
-  update(value, deltaTime) {
-    this.timeline.unshift({ value, received: Date.now(), deltaTime });
-    if (this.timeline.length > 10)
-      this.timeline.pop();
-    this.current = value;
-  }
-  static Lerp(initial) {
-    return new Interpolator((c, p, t) => c * t + p * (1 - t), initial);
-  }
-};
-__name(Interpolator, "Interpolator");
-var Update = class {
-  constructor(value, time, deltaTime) {
-    this.value = value;
-    this.time = time;
-    this.deltaTime = deltaTime;
-  }
-};
-__name(Update, "Update");
-function Proxybox(obj) {
-  const box = {};
-  for (const prop in obj) {
-    if (typeof obj[prop] == "object") {
-      box[prop] = Proxybox(obj[prop]);
-    } else {
-      box[prop] = obj[prop];
+var _Interpolator = class {
+  constructor(object, property, method) {
+    if (typeof object != "object") {
+      throw new Error(`Cannot apply interpolator on the non-object '${object}'`);
     }
-    let storer = box[prop];
-    Object.defineProperty(box, prop, {
-      get() {
-        if (storer instanceof Interpolator) {
-          return storer.value;
-        }
-        return storer;
-      },
-      set(value) {
-        if (!(value instanceof Update))
-          storer = value;
-        if (storer instanceof Interpolator) {
-          console.log(value);
-          return storer.update(value.value, value.deltaTime);
-        }
-        storer = value.value;
-      }
+    if (typeof object[property] != "number") {
+      throw new Error(`Cannot apply interpolator on the non-number '${object[property]}'`);
+    }
+    if (!method)
+      throw new Error("No method passed when creating new Interpolator instance");
+    this.timeline = [{
+      value: object[property],
+      received: Date.now() / 1e3,
+      deltaTime: 0
+    }];
+    this.method = method;
+    Object.defineProperty(object, property, {
+      get: function() {
+        return this.method(this.timeline);
+      }.bind(this),
+      set: function(value) {
+        this.update(value);
+        return true;
+      }.bind(this)
     });
   }
-  return box;
+  update(value) {
+    if (typeof value != "number") {
+      throw new Error(`Cannot apply interpolator on the non-number '${value}'`);
+    }
+    this.timeline.unshift({
+      value,
+      received: Date.now() / 1e3,
+      deltaTime: Date.now() / 1e3 - this.timeline[0].received
+    });
+    if (this.timeline.length > 10)
+      this.timeline.pop();
+  }
+  delete(replacement = this.object[this.property]) {
+    delete this.object[this.property];
+    this.object[this.property] = replacement;
+  }
+};
+var Interpolator = _Interpolator;
+__name(Interpolator, "Interpolator");
+Interpolator.Lerp = /* @__PURE__ */ __name((object, property, offset = 0.1) => new _Interpolator(object, property, (timeline) => {
+  if (timeline.length == 1)
+    return timeline[0].value;
+  const firstNeg = timeline.findIndex((x) => x.received < Date.now() / 1e3 - offset);
+  if (firstNeg <= 0)
+    return timeline[0].value;
+  const tilUpdate = timeline[firstNeg - 1].received - Date.now() / 1e3 + offset;
+  const parsedDelta = Math.min(offset, timeline[firstNeg - 1].deltaTime);
+  if (tilUpdate > parsedDelta)
+    return timeline[firstNeg].value;
+  const t = (parsedDelta - tilUpdate) / parsedDelta;
+  return t * timeline[firstNeg - 1].value + (1 - t) * timeline[firstNeg].value;
+}), "Lerp");
+Interpolator.MaintainSpeed = /* @__PURE__ */ __name((object, property, maxDelta = 0.1) => new _Interpolator(object, property, (timeline) => {
+  if (timeline.length == 1)
+    return timeline[0].value;
+  if (Date.now() / 1e3 - timeline[0].received > maxDelta)
+    return timeline[0].value;
+  const sinceLastUpdate = Date.now() / 1e3 - timeline[0].received;
+  const t = sinceLastUpdate / timeline[0].deltaTime;
+  return timeline[0].value + (timeline[0].value - timeline[1].value) * t;
+}), "MaintainSpeed");
+
+// kasocket/client/serverInterface.ts
+var ServerUpdate = class {
+  constructor(value) {
+    this.value = value;
+  }
+};
+__name(ServerUpdate, "ServerUpdate");
+function Declassify(object, ctx) {
+  if (object.type == "value")
+    return object.value;
+  if (object.type == "kaboom") {
+    return ctx[object.name](...Declassify(object.args, ctx));
+  }
+  if (object.type == "object") {
+    const ret = {};
+    for (const prop in object.properties) {
+      ret[prop] = Declassify(object.properties[prop], ctx);
+    }
+    return ret;
+  }
+  if (object.type == "array") {
+    return object.values.map((x) => Declassify(x, ctx));
+  }
 }
-__name(Proxybox, "Proxybox");
+__name(Declassify, "Declassify");
 
 // kasocket/client/index.ts
 var Client = class {
@@ -140,7 +165,7 @@ var Client = class {
   } = {}) {
     this.events = {};
     this.ready = false;
-    this.lastUpdate = 0;
+    this.lastUpdate = Date.now();
     this.deltaTime = 0;
     this.ctx = kaboom;
     this.clients = /* @__PURE__ */ new Map();
@@ -148,15 +173,33 @@ var Client = class {
     this.public = this.CreateMutationProxy("public", {});
     this.private = this.CreateMutationProxy("private", {});
     this.ws.onmessage = (event) => {
-      const message = Message.fromString(event.data);
+      const message = Message.Parse(event.data);
       if (Date.now() - message.time > 1e3)
         return;
       if (message.name == "_") {
-        this.deltaTime = Date.now() - this.lastUpdate;
+        this.deltaTime = (Date.now() - this.lastUpdate) / 1e3;
         this.lastUpdate = Date.now();
+        const newClients = /* @__PURE__ */ new Map();
+        let init = false;
         for (const operation of message.data.operations) {
-          console.log(operation);
           this.HandleOperation(operation);
+          if (operation.operation == "cre") {
+            newClients.set(operation.id, operation.client);
+          } else if (operation.operation == "init") {
+            init = true;
+          }
+        }
+        if (init && this.connectEvent) {
+          const client = this.clients.get(this.id);
+          this.connectEvent(client, this.id);
+        }
+        if (this.clientEvent) {
+          for (const [id, client] of newClients) {
+            this.clientEvent(client, id);
+          }
+        }
+        if (this.updateEvent) {
+          this.updateEvent();
         }
       }
       if (message.name in this.events) {
@@ -179,24 +222,32 @@ var Client = class {
       for (const p of operation.path)
         object = object[p];
       switch (operation.instruction) {
-        case "set":
-          return object[operation.property] = new Update(operation.value, operation.time, this.deltaTime);
-        case "delete":
+        case "set": {
+          const declass = Declassify(operation.value, this.ctx);
+          if (operation.id == this.id) {
+            return object[operation.property] = new ServerUpdate(declass);
+          } else {
+            return object[operation.property] = declass;
+          }
+        }
+        case "delete": {
           return delete object[operation.property];
+        }
         default:
           throw new ReferenceError(`'${operation.instruction}' is not a valid client mutation instruction`);
       }
     } else if (operation.operation == "cre") {
-      this.clients.set(operation.id, Proxybox(operation.client));
+      this.clients.set(operation.id, Declassify(operation.client, this.ctx));
     } else if (operation.operation == "init") {
       this.ready = true;
       this.id = operation.id;
       for (const clientID in operation.clients) {
-        this.clients.set(clientID, Proxybox(operation.clients[clientID]));
+        this.clients.set(clientID, Declassify(operation.clients[clientID], this.ctx));
       }
       for (const instance in operation.clientData) {
-        this[instance] = this.CreateMutationProxy(instance, operation.clientData[instance]);
+        this[instance] = this.CreateMutationProxy(instance, Declassify(operation.clientData[instance], this.ctx));
       }
+      this.clients.set(this.id, this.public);
     } else
       throw new Error(`That is not a valid operation`);
   }
@@ -217,33 +268,43 @@ var Client = class {
       }
     };
   }
-  send(type, data) {
-    this.ws.send(Message.toString(type, data));
+  send(name, data) {
+    this.ws.send(Message.Create(name, data));
+  }
+  onConnect(callback) {
+    this.connectEvent = callback;
+  }
+  onClientConnect(callback) {
+    this.clientEvent = callback;
+  }
+  onServerUpdate(callback) {
+    this.updateEvent = callback;
   }
   CreateMutationProxy(instance, proxied) {
-    const t = this;
     function recursiveProxy(object, path) {
       return new Proxy(object, {
+        has(object2, property) {
+          if (property == "__isProxy")
+            return true;
+          return property in object2;
+        },
         get(object2, property) {
-          if (typeof object2[property] != "object" || Array.isArray(object2[property]) || object2[property] == null) {
+          if (typeof object2[property] != "object" || object2[property] === null) {
             return object2[property];
           }
-          return recursiveProxy(object2, [...path, property]);
+          if ("__isProxy" in object2)
+            return object2[property];
+          return recursiveProxy(object2[property], [...path, property]);
         },
-        set(object2, property, value) {
+        set: function(object2, property, value) {
           if (object2[property] === value)
             return false;
-          let data = t.clients.get(t.id);
-          for (const p of path) {
-            if (!data)
-              throw new ReferenceError(`The property '${p}' does not exist on ${data}`);
-            data = data[p];
+          if (value instanceof ServerUpdate) {
+            object2[property] = value.value;
+            return true;
           }
-          if (!data)
-            throw new ReferenceError(`Data does not exist`);
-          data[property] = { value, time: Date.now() };
           object2[property] = value;
-          t.ws.send(Message.bundleOperations(this.deltaTime, {
+          this.ws.send(Message.BundleOperations(this.deltaTime, {
             operation: "mut_cli",
             instruction: "set",
             instance,
@@ -252,19 +313,12 @@ var Client = class {
             value
           }));
           return true;
-        },
-        deleteProperty(object2, property) {
+        }.bind(this),
+        deleteProperty: function(object2, property) {
           if (!(property in object2))
             return false;
-          let clientData = t.clients.get(t.id);
-          if (!clientData)
-            throw new ReferenceError("Client data does not exist");
-          let data = clientData[instance];
-          for (const p of path)
-            data = data[p];
-          delete data[property];
           delete object2[property];
-          t.ws.send(Message.bundleOperations(this.deltaTime, {
+          this.ws.send(Message.BundleOperations(this.deltaTime, {
             operation: "mut_cli",
             instruction: "delete",
             instance,
@@ -272,11 +326,11 @@ var Client = class {
             property
           }));
           return true;
-        }
+        }.bind(this)
       });
     }
     __name(recursiveProxy, "recursiveProxy");
-    return recursiveProxy(proxied, []);
+    return recursiveProxy.bind(this)(proxied, []);
   }
   getClients() {
     return Object.keys(this.clients).map((id) => __spreadValues({ id }, this.clients.get(id)));

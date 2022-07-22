@@ -9,17 +9,17 @@ export default class Message {
         this.time = Date.now();
     }
 
-    static bundleOperations(deltaTime: number, operations: { [key: string]: any }[] | { [key: string]: any }) {
+    static BundleOperations(deltaTime: number, operations: { [key: string]: any }[] | { [key: string]: any }) {
         if(!Array.isArray(operations)) operations = [operations];
         return JSON.stringify(new Message('_', { operations, deltaTime }));
     }
 
-    static fromString(str: string) {
+    static Parse(str: string) {
         const parsed = JSON.parse(str);
         return new Message(parsed.name, parsed.data);
     }
 
-    static toString(name: string, data: any) {
+    static Create(name: string, data: any) {
         return JSON.stringify(new Message(name, data));
     }
 }

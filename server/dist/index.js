@@ -2703,12 +2703,12 @@ var require_websocket_server = __commonJS({
     };
     __name(WebSocketServer2, "WebSocketServer");
     module2.exports = WebSocketServer2;
-    function addListeners(server, map) {
-      for (const event of Object.keys(map))
-        server.on(event, map[event]);
+    function addListeners(server, map2) {
+      for (const event of Object.keys(map2))
+        server.on(event, map2[event]);
       return /* @__PURE__ */ __name(function removeListeners() {
-        for (const event of Object.keys(map)) {
-          server.removeListener(event, map[event]);
+        for (const event of Object.keys(map2)) {
+          server.removeListener(event, map2[event]);
         }
       }, "removeListeners");
     }
@@ -2747,13 +2747,337 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// kasocket/index.ts
-var kasocket_exports = {};
-__export(kasocket_exports, {
-  InitialClientData: () => InitialClientData,
+// node_modules/nanotimer/lib/nanotimer.js
+var require_nanotimer = __commonJS({
+  "node_modules/nanotimer/lib/nanotimer.js"(exports, module2) {
+    function NanoTimer2(log) {
+      var version = process.version;
+      var major = version.split(".")[0];
+      major = major.split("v")[1];
+      var minor = version.split(".")[1];
+      if (major == 0 && minor < 10) {
+        console.log("Error: Please update to the latest version of node! This library requires 0.10.x or later");
+        process.exit(0);
+      }
+      this.intervalT1 = null;
+      this.timeOutT1 = null;
+      this.intervalCount = 1;
+      this.deferredInterval = false;
+      this.deferredTimeout = false;
+      this.deferredTimeoutRef = null;
+      this.deferredIntervalRef = null;
+      this.timeoutCallbackRef = null;
+      this.intervalCallbackRef = null;
+      this.timeoutImmediateRef = null;
+      this.intervalImmediateRef = null;
+      this.intervalErrorChecked = false;
+      this.intervalType = "";
+      this.timeoutTriggered = false;
+      if (log) {
+        this.logging = true;
+      }
+    }
+    __name(NanoTimer2, "NanoTimer");
+    NanoTimer2.prototype.time = function(task, args, format, callback) {
+      if (callback) {
+        var t1 = process.hrtime();
+        if (args) {
+          args.push(function() {
+            var time = process.hrtime(t1);
+            if (format == "s") {
+              callback(time[0] + time[1] / 1e9);
+            } else if (format == "m") {
+              callback(time[0] * 1e3 + time[1] / 1e6);
+            } else if (format == "u") {
+              callback(time[0] * 1e6 + time[1] / 1e3);
+            } else if (format == "n") {
+              callback(time[0] * 1e9 + time[1]);
+            } else {
+              callback(time);
+            }
+          });
+          task.apply(null, args);
+        } else {
+          task(function() {
+            var time = process.hrtime(t1);
+            if (format == "s") {
+              callback(time[0] + time[1] / 1e9);
+            } else if (format == "m") {
+              callback(time[0] * 1e3 + time[1] / 1e6);
+            } else if (format == "u") {
+              callback(time[0] * 1e6 + time[1] / 1e3);
+            } else if (format == "n") {
+              callback(time[0] * 1e9 + time[1]);
+            } else {
+              callback(time);
+            }
+          });
+        }
+      } else {
+        var t1 = process.hrtime();
+        if (args) {
+          task.apply(null, args);
+        } else {
+          task();
+        }
+        var t2 = process.hrtime(t1);
+        if (format == "s") {
+          return t2[0] + t2[1] / 1e9;
+        } else if (format == "m") {
+          return t2[0] * 1e3 + t2[1] / 1e6;
+        } else if (format == "u") {
+          return t2[0] * 1e6 + t2[1] / 1e3;
+        } else if (format == "n") {
+          return t2[0] * 1e9 + t2[1];
+        } else {
+          return process.hrtime(t1);
+        }
+      }
+    };
+    NanoTimer2.prototype.setInterval = function(task, args, interval, callback) {
+      if (!this.intervalErrorChecked) {
+        if (!task) {
+          console.log("A task function must be specified to setInterval");
+          process.exit(1);
+        } else {
+          if (typeof task != "function") {
+            console.log("Task argument to setInterval must be a function reference");
+            process.exit(1);
+          }
+        }
+        if (!interval) {
+          console.log("An interval argument must be specified");
+          process.exit(1);
+        } else {
+          if (typeof interval != "string") {
+            console.log("Interval argument to setInterval must be a string specified as an integer followed by 's' for seconds, 'm' for milli, 'u' for micro, and 'n' for nanoseconds. Ex. 2u");
+            process.exit(1);
+          }
+        }
+        if (callback) {
+          if (typeof callback != "function") {
+            console.log("Callback argument to setInterval must be a function reference");
+            process.exit(1);
+          } else {
+            this.intervalCallbackRef = callback;
+          }
+        }
+        this.intervalType = interval[interval.length - 1];
+        if (this.intervalType == "s") {
+          this.intervalTime = interval.slice(0, interval.length - 1) * 1e9;
+        } else if (this.intervalType == "m") {
+          this.intervalTime = interval.slice(0, interval.length - 1) * 1e6;
+        } else if (this.intervalType == "u") {
+          this.intervalTime = interval.slice(0, interval.length - 1) * 1e3;
+        } else if (this.intervalType == "n") {
+          this.intervalTime = interval.slice(0, interval.length - 1);
+        } else {
+          console.log("Error with argument: " + interval + ': Incorrect interval format. Format is an integer followed by "s" for seconds, "m" for milli, "u" for micro, and "n" for nanoseconds. Ex. 2u');
+          process.exit(1);
+        }
+        this.intervalErrorChecked = true;
+      }
+      var thisTimer = this;
+      if (this.intervalTime > 0) {
+        if (this.intervalT1 == null) {
+          this.intervalT1 = process.hrtime();
+        }
+        if (this.intervalTime * this.intervalCount > 8e15) {
+          this.intervalT1 = process.hrtime();
+          this.intervalCount = 1;
+        }
+        this.difArray = process.hrtime(this.intervalT1);
+        this.difTime = this.difArray[0] * 1e9 + this.difArray[1];
+        if (this.difTime < this.intervalTime * this.intervalCount) {
+          if (this.intervalTime > 25e6) {
+            if (this.deferredInterval == false) {
+              this.deferredInterval = true;
+              var msDelay = (this.intervalTime - 25e6) / 1e6;
+              this.deferredIntervalRef = setTimeout(function() {
+                thisTimer.setInterval(task, args, interval, callback);
+              }, msDelay);
+            } else {
+              this.deferredIntervalRef = null;
+              this.intervalImmediateRef = setImmediate(function() {
+                thisTimer.setInterval(task, args, interval, callback);
+              });
+            }
+          } else {
+            this.intervalImmediateRef = setImmediate(function() {
+              thisTimer.setInterval(task, args, interval, callback);
+            });
+          }
+        } else {
+          this.intervalImmediateRef = null;
+          if (this.logging) {
+            console.log("nanotimer log: cycle time at - " + this.difTime);
+          }
+          if (args) {
+            task.apply(null, args);
+          } else {
+            task();
+          }
+          if (this.intervalT1) {
+            this.intervalCount++;
+            this.deferredInterval = false;
+            this.intervalImmediateRef = setImmediate(function() {
+              thisTimer.setInterval(task, args, interval, callback);
+            });
+          }
+        }
+      } else {
+        if (this.intervalT1 == null) {
+          this.intervalT1 = process.hrtime();
+        }
+        if (args) {
+          task.apply(null, args);
+        } else {
+          task();
+        }
+        if (this.intervalT1) {
+          this.intervalImmediateRef = setImmediate(function() {
+            thisTimer.setInterval(task, args, interval, callback);
+          });
+        }
+      }
+    };
+    NanoTimer2.prototype.setTimeout = function(task, args, delay, callback) {
+      if (!task) {
+        console.log("A task function must be specified to setTimeout");
+        process.exit(1);
+      } else {
+        if (typeof task != "function") {
+          console.log("Task argument to setTimeout must be a function reference");
+          process.exit(1);
+        }
+      }
+      if (!delay) {
+        console.log("A delay argument must be specified");
+        process.exit(1);
+      } else {
+        if (typeof delay != "string") {
+          console.log("Delay argument to setTimeout must be a string specified as an integer followed by 's' for seconds, 'm' for milli, 'u' for micro, and 'n' for nanoseconds. Ex. 2u");
+          process.exit(1);
+        }
+      }
+      if (callback) {
+        if (typeof callback != "function") {
+          console.log("Callback argument to setTimeout must be a function reference");
+          process.exit(1);
+        } else {
+          this.timeoutCallbackRef = callback;
+        }
+      }
+      var thisTimer = this;
+      if (this.timeoutTriggered) {
+        this.timeoutTriggered = false;
+      }
+      var delayType = delay[delay.length - 1];
+      if (delayType == "s") {
+        var delayTime = delay.slice(0, delay.length - 1) * 1e9;
+      } else if (delayType == "m") {
+        var delayTime = delay.slice(0, delay.length - 1) * 1e6;
+      } else if (delayType == "u") {
+        var delayTime = delay.slice(0, delay.length - 1) * 1e3;
+      } else if (delayType == "n") {
+        var delayTime = delay.slice(0, delay.length - 1);
+      } else {
+        console.log("Error with argument: " + delay + ': Incorrect delay format. Format is an integer followed by "s" for seconds, "m" for milli, "u" for micro, and "n" for nanoseconds. Ex. 2u');
+        process.exit(1);
+      }
+      if (this.timeOutT1 == null) {
+        this.timeOutT1 = process.hrtime();
+      }
+      var difArray = process.hrtime(this.timeOutT1);
+      var difTime = difArray[0] * 1e9 + difArray[1];
+      if (difTime < delayTime) {
+        if (delayTime > 25e6) {
+          if (this.deferredTimeout == false) {
+            this.deferredTimeout = true;
+            var msDelay = (delayTime - 25e6) / 1e6;
+            this.deferredTimeoutRef = setTimeout(function() {
+              thisTimer.setTimeout(task, args, delay, callback);
+            }, msDelay);
+          } else {
+            this.deferredTimeoutRef = null;
+            this.timeoutImmediateRef = setImmediate(function() {
+              thisTimer.setTimeout(task, args, delay, callback);
+            });
+          }
+        } else {
+          this.timeoutImmediateRef = setImmediate(function() {
+            thisTimer.setTimeout(task, args, delay, callback);
+          });
+        }
+      } else {
+        this.timeoutTriggered = true;
+        this.timeoutImmediateRef = null;
+        this.timeOutT1 = null;
+        this.deferredTimeout = false;
+        if (this.logging == true) {
+          console.log("nanotimer log: actual wait - " + difTime);
+        }
+        if (args) {
+          task.apply(null, args);
+        } else {
+          task();
+        }
+        if (callback) {
+          var data = { "waitTime": difTime };
+          callback(data);
+        }
+      }
+    };
+    NanoTimer2.prototype.clearInterval = function() {
+      if (this.deferredIntervalRef) {
+        clearTimeout(this.deferredIntervalRef);
+        this.deferredInterval = false;
+      }
+      if (this.intervalImmediateRef) {
+        clearImmediate(this.intervalImmediateRef);
+      }
+      this.intervalT1 = null;
+      this.intervalCount = 1;
+      this.intervalErrorChecked = false;
+      if (this.intervalCallbackRef) {
+        this.intervalCallbackRef();
+      }
+    };
+    NanoTimer2.prototype.clearTimeout = function() {
+      if (this.timeoutTriggered == false) {
+        if (this.deferredTimeoutRef) {
+          clearTimeout(this.deferredTimeoutRef);
+          if (this.timeOutT1) {
+            var difArray = process.hrtime(this.timeOutT1);
+            var difTime = difArray[0] * 1e9 + difArray[1];
+          }
+          this.deferredTimeout = false;
+        }
+        if (this.timeoutImmediateRef) {
+          clearImmediate(this.timeoutImmediateRef);
+        }
+        this.timeOutT1 = null;
+        if (this.timeoutCallbackRef) {
+          var data = { "waitTime": difTime };
+          this.timeoutCallbackRef(data);
+        }
+      }
+    };
+    NanoTimer2.prototype.hasTimeout = function() {
+      return this.timeOutT1 != null;
+    };
+    module2.exports = NanoTimer2;
+  }
+});
+
+// kasocket/server/index.ts
+var server_exports = {};
+__export(server_exports, {
+  Kaboom: () => Kaboom,
   Server: () => Server
 });
-module.exports = __toCommonJS(kasocket_exports);
+module.exports = __toCommonJS(server_exports);
+var import_util = __toESM(require("util"));
 
 // node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
@@ -2762,29 +3086,863 @@ var import_sender = __toESM(require_sender(), 1);
 var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
-// kasocket/types/message.ts
+// kasocket/server/kaboom/math.ts
+function deg2rad(deg) {
+  return deg * Math.PI / 180;
+}
+__name(deg2rad, "deg2rad");
+function rad2deg(rad) {
+  return rad * 180 / Math.PI;
+}
+__name(rad2deg, "rad2deg");
+function clamp(val, min, max) {
+  if (min > max) {
+    return clamp(val, max, min);
+  }
+  return Math.min(Math.max(val, min), max);
+}
+__name(clamp, "clamp");
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+__name(lerp, "lerp");
+function map(v, l1, h1, l2, h2) {
+  return l2 + (v - l1) / (h1 - l1) * (h2 - l2);
+}
+__name(map, "map");
+function mapc(v, l1, h1, l2, h2) {
+  return clamp(map(v, l1, h1, l2, h2), l2, h2);
+}
+__name(mapc, "mapc");
+var _Vec2 = class {
+  constructor(x = 0, y = x) {
+    this.x = 0;
+    this.y = 0;
+    this.x = x;
+    this.y = y;
+  }
+  static fromAngle(deg) {
+    const angle = deg2rad(deg);
+    return new _Vec2(Math.cos(angle), Math.sin(angle));
+  }
+  clone() {
+    return new _Vec2(this.x, this.y);
+  }
+  add(...args) {
+    const p2 = vec2(...args);
+    return new _Vec2(this.x + p2.x, this.y + p2.y);
+  }
+  sub(...args) {
+    const p2 = vec2(...args);
+    return new _Vec2(this.x - p2.x, this.y - p2.y);
+  }
+  scale(...args) {
+    const s = vec2(...args);
+    return new _Vec2(this.x * s.x, this.y * s.y);
+  }
+  dist(...args) {
+    const p2 = vec2(...args);
+    return Math.sqrt((this.x - p2.x) * (this.x - p2.x) + (this.y - p2.y) * (this.y - p2.y));
+  }
+  len() {
+    return this.dist(new _Vec2(0, 0));
+  }
+  unit() {
+    const len = this.len();
+    return len === 0 ? new _Vec2(0) : this.scale(1 / len);
+  }
+  normal() {
+    return new _Vec2(this.y, -this.x);
+  }
+  dot(p2) {
+    return this.x * p2.x + this.y * p2.y;
+  }
+  angle(...args) {
+    const p2 = vec2(...args);
+    return rad2deg(Math.atan2(this.y - p2.y, this.x - p2.x));
+  }
+  lerp(p2, t) {
+    return new _Vec2(lerp(this.x, p2.x, t), lerp(this.y, p2.y, t));
+  }
+  isZero() {
+    return this.x === 0 && this.y === 0;
+  }
+  toFixed(n) {
+    return new _Vec2(Number(this.x.toFixed(n)), Number(this.y.toFixed(n)));
+  }
+  eq(other) {
+    return this.x === other.x && this.y === other.y;
+  }
+  toString() {
+    return `vec2(${this.x.toFixed(2)}, ${this.y.toFixed(2)})`;
+  }
+};
+var Vec2 = _Vec2;
+__name(Vec2, "Vec2");
+Vec2.LEFT = new _Vec2(-1, 0);
+Vec2.RIGHT = new _Vec2(1, 0);
+Vec2.UP = new _Vec2(0, -1);
+Vec2.DOWN = new _Vec2(0, 1);
+function vec2(...args) {
+  if (args.length === 1) {
+    if (args[0] instanceof Vec2) {
+      return vec2(args[0].x, args[0].y);
+    } else if (Array.isArray(args[0]) && args[0].length === 2) {
+      return vec2(...args[0]);
+    }
+  }
+  return new Vec2(...args);
+}
+__name(vec2, "vec2");
+var Vec3 = class {
+  constructor(x, y, z) {
+    this.x = 0;
+    this.y = 0;
+    this.z = 0;
+    this.x = x;
+    this.y = y;
+    this.z = z;
+  }
+  xy() {
+    return vec2(this.x, this.y);
+  }
+};
+__name(Vec3, "Vec3");
+var vec3 = /* @__PURE__ */ __name((x, y, z) => new Vec3(x, y, z), "vec3");
+var _Color = class {
+  constructor(r, g2, b) {
+    this.r = 255;
+    this.g = 255;
+    this.b = 255;
+    this.r = clamp(r, 0, 255);
+    this.g = clamp(g2, 0, 255);
+    this.b = clamp(b, 0, 255);
+  }
+  static fromArray(arr) {
+    return new _Color(arr[0], arr[1], arr[2]);
+  }
+  clone() {
+    return new _Color(this.r, this.g, this.b);
+  }
+  lighten(a) {
+    return new _Color(this.r + a, this.g + a, this.b + a);
+  }
+  darken(a) {
+    return this.lighten(-a);
+  }
+  invert() {
+    return new _Color(255 - this.r, 255 - this.g, 255 - this.b);
+  }
+  mult(other) {
+    return new _Color(this.r * other.r / 255, this.g * other.g / 255, this.b * other.b / 255);
+  }
+  eq(other) {
+    return this.r === other.r && this.g === other.g && this.b === other.b;
+  }
+  toString() {
+    return `rgb(${this.r}, ${this.g}, ${this.b})`;
+  }
+  static fromHSL(h, s, l) {
+    if (s == 0) {
+      return rgb(255 * l, 255 * l, 255 * l);
+    }
+    const hue2rgb = /* @__PURE__ */ __name((p2, q2, t) => {
+      if (t < 0)
+        t += 1;
+      if (t > 1)
+        t -= 1;
+      if (t < 1 / 6)
+        return p2 + (q2 - p2) * 6 * t;
+      if (t < 1 / 2)
+        return q2;
+      if (t < 2 / 3)
+        return p2 + (q2 - p2) * (2 / 3 - t) * 6;
+      return p2;
+    }, "hue2rgb");
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const r = hue2rgb(p, q, h + 1 / 3);
+    const g2 = hue2rgb(p, q, h);
+    const b = hue2rgb(p, q, h - 1 / 3);
+    return new _Color(Math.round(r * 255), Math.round(g2 * 255), Math.round(b * 255));
+  }
+};
+var Color = _Color;
+__name(Color, "Color");
+Color.RED = rgb(255, 0, 0);
+Color.GREEN = rgb(0, 255, 0);
+Color.BLUE = rgb(0, 0, 255);
+Color.YELLOW = rgb(255, 255, 0);
+Color.MAGENTA = rgb(255, 0, 255);
+Color.CYAN = rgb(0, 255, 255);
+Color.WHITE = rgb(255, 255, 255);
+Color.BLACK = rgb(0, 0, 0);
+function rgb(...args) {
+  if (args.length === 0) {
+    return new Color(255, 255, 255);
+  } else if (args.length === 1) {
+    if (args[0] instanceof Color) {
+      return args[0].clone();
+    } else if (Array.isArray(args[0]) && args[0].length === 3) {
+      return Color.fromArray(args[0]);
+    }
+  }
+  return new Color(...args);
+}
+__name(rgb, "rgb");
+var hsl2rgb = /* @__PURE__ */ __name((h, s, l) => Color.fromHSL(h, s, l), "hsl2rgb");
+var Quad = class {
+  constructor(x, y, w, h) {
+    this.x = 0;
+    this.y = 0;
+    this.w = 1;
+    this.h = 1;
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+  }
+  scale(other) {
+    return new Quad(this.x + this.w * other.x, this.y + this.h * other.y, this.w * other.w, this.h * other.h);
+  }
+  clone() {
+    return new Quad(this.x, this.y, this.w, this.h);
+  }
+  eq(other) {
+    return this.x === other.x && this.y === other.y && this.w === other.w && this.h === other.h;
+  }
+  toString() {
+    return `quad(${this.x}, ${this.y}, ${this.w}, ${this.h})`;
+  }
+};
+__name(Quad, "Quad");
+function quad(x, y, w, h) {
+  return new Quad(x, y, w, h);
+}
+__name(quad, "quad");
+var Mat4 = class {
+  constructor(m) {
+    this.m = [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+    ];
+    if (m) {
+      this.m = m;
+    }
+  }
+  static translate(p) {
+    return new Mat4([
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      p.x,
+      p.y,
+      0,
+      1
+    ]);
+  }
+  static scale(s) {
+    return new Mat4([
+      s.x,
+      0,
+      0,
+      0,
+      0,
+      s.y,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+    ]);
+  }
+  static rotateX(a) {
+    a = deg2rad(-a);
+    return new Mat4([
+      1,
+      0,
+      0,
+      0,
+      0,
+      Math.cos(a),
+      -Math.sin(a),
+      0,
+      0,
+      Math.sin(a),
+      Math.cos(a),
+      0,
+      0,
+      0,
+      0,
+      1
+    ]);
+  }
+  static rotateY(a) {
+    a = deg2rad(-a);
+    return new Mat4([
+      Math.cos(a),
+      0,
+      Math.sin(a),
+      0,
+      0,
+      1,
+      0,
+      0,
+      -Math.sin(a),
+      0,
+      Math.cos(a),
+      0,
+      0,
+      0,
+      0,
+      1
+    ]);
+  }
+  static rotateZ(a) {
+    a = deg2rad(-a);
+    return new Mat4([
+      Math.cos(a),
+      -Math.sin(a),
+      0,
+      0,
+      Math.sin(a),
+      Math.cos(a),
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+    ]);
+  }
+  translate(p) {
+    return this.mult(Mat4.translate(p));
+  }
+  scale(s) {
+    return this.mult(Mat4.scale(s));
+  }
+  rotateX(a) {
+    return this.mult(Mat4.rotateX(a));
+  }
+  rotateY(a) {
+    return this.mult(Mat4.rotateY(a));
+  }
+  rotateZ(a) {
+    return this.mult(Mat4.rotateZ(a));
+  }
+  mult(other) {
+    const out = [];
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        out[i * 4 + j] = this.m[0 * 4 + j] * other.m[i * 4 + 0] + this.m[1 * 4 + j] * other.m[i * 4 + 1] + this.m[2 * 4 + j] * other.m[i * 4 + 2] + this.m[3 * 4 + j] * other.m[i * 4 + 3];
+      }
+    }
+    return new Mat4(out);
+  }
+  multVec4(p) {
+    return {
+      x: p.x * this.m[0] + p.y * this.m[4] + p.z * this.m[8] + p.w * this.m[12],
+      y: p.x * this.m[1] + p.y * this.m[5] + p.z * this.m[9] + p.w * this.m[13],
+      z: p.x * this.m[2] + p.y * this.m[6] + p.z * this.m[10] + p.w * this.m[14],
+      w: p.x * this.m[3] + p.y * this.m[7] + p.z * this.m[11] + p.w * this.m[15]
+    };
+  }
+  multVec3(p) {
+    const p4 = this.multVec4({
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      w: 1
+    });
+    return vec3(p4.x, p4.y, p4.z);
+  }
+  multVec2(p) {
+    return vec2(p.x * this.m[0] + p.y * this.m[4] + 0 * this.m[8] + 1 * this.m[12], p.x * this.m[1] + p.y * this.m[5] + 0 * this.m[9] + 1 * this.m[13]);
+  }
+  invert() {
+    const out = [];
+    const f00 = this.m[10] * this.m[15] - this.m[14] * this.m[11];
+    const f01 = this.m[9] * this.m[15] - this.m[13] * this.m[11];
+    const f02 = this.m[9] * this.m[14] - this.m[13] * this.m[10];
+    const f03 = this.m[8] * this.m[15] - this.m[12] * this.m[11];
+    const f04 = this.m[8] * this.m[14] - this.m[12] * this.m[10];
+    const f05 = this.m[8] * this.m[13] - this.m[12] * this.m[9];
+    const f06 = this.m[6] * this.m[15] - this.m[14] * this.m[7];
+    const f07 = this.m[5] * this.m[15] - this.m[13] * this.m[7];
+    const f08 = this.m[5] * this.m[14] - this.m[13] * this.m[6];
+    const f09 = this.m[4] * this.m[15] - this.m[12] * this.m[7];
+    const f10 = this.m[4] * this.m[14] - this.m[12] * this.m[6];
+    const f11 = this.m[5] * this.m[15] - this.m[13] * this.m[7];
+    const f12 = this.m[4] * this.m[13] - this.m[12] * this.m[5];
+    const f13 = this.m[6] * this.m[11] - this.m[10] * this.m[7];
+    const f14 = this.m[5] * this.m[11] - this.m[9] * this.m[7];
+    const f15 = this.m[5] * this.m[10] - this.m[9] * this.m[6];
+    const f16 = this.m[4] * this.m[11] - this.m[8] * this.m[7];
+    const f17 = this.m[4] * this.m[10] - this.m[8] * this.m[6];
+    const f18 = this.m[4] * this.m[9] - this.m[8] * this.m[5];
+    out[0] = this.m[5] * f00 - this.m[6] * f01 + this.m[7] * f02;
+    out[4] = -(this.m[4] * f00 - this.m[6] * f03 + this.m[7] * f04);
+    out[8] = this.m[4] * f01 - this.m[5] * f03 + this.m[7] * f05;
+    out[12] = -(this.m[4] * f02 - this.m[5] * f04 + this.m[6] * f05);
+    out[1] = -(this.m[1] * f00 - this.m[2] * f01 + this.m[3] * f02);
+    out[5] = this.m[0] * f00 - this.m[2] * f03 + this.m[3] * f04;
+    out[9] = -(this.m[0] * f01 - this.m[1] * f03 + this.m[3] * f05);
+    out[13] = this.m[0] * f02 - this.m[1] * f04 + this.m[2] * f05;
+    out[2] = this.m[1] * f06 - this.m[2] * f07 + this.m[3] * f08;
+    out[6] = -(this.m[0] * f06 - this.m[2] * f09 + this.m[3] * f10);
+    out[10] = this.m[0] * f11 - this.m[1] * f09 + this.m[3] * f12;
+    out[14] = -(this.m[0] * f08 - this.m[1] * f10 + this.m[2] * f12);
+    out[3] = -(this.m[1] * f13 - this.m[2] * f14 + this.m[3] * f15);
+    out[7] = this.m[0] * f13 - this.m[2] * f16 + this.m[3] * f17;
+    out[11] = -(this.m[0] * f14 - this.m[1] * f16 + this.m[3] * f18);
+    out[15] = this.m[0] * f15 - this.m[1] * f17 + this.m[2] * f18;
+    const det = this.m[0] * out[0] + this.m[1] * out[4] + this.m[2] * out[8] + this.m[3] * out[12];
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        out[i * 4 + j] *= 1 / det;
+      }
+    }
+    return new Mat4(out);
+  }
+  clone() {
+    return new Mat4(this.m);
+  }
+  toString() {
+    return this.m.toString();
+  }
+};
+__name(Mat4, "Mat4");
+function wave(lo, hi, t, f = Math.sin) {
+  return lo + (f(t) + 1) / 2 * (hi - lo);
+}
+__name(wave, "wave");
+var A = 1103515245;
+var C = 12345;
+var M = 2147483648;
+var RNG = class {
+  constructor(seed) {
+    this.seed = seed;
+  }
+  gen() {
+    this.seed = (A * this.seed + C) % M;
+    return this.seed / M;
+  }
+  genNumber(a, b) {
+    return a + this.gen() * (b - a);
+  }
+  genVec2(a, b) {
+    return new Vec2(this.genNumber(a.x, b.x), this.genNumber(a.y, b.y));
+  }
+  genColor(a, b) {
+    return new Color(this.genNumber(a.r, b.r), this.genNumber(a.g, b.g), this.genNumber(a.b, b.b));
+  }
+  genAny(...args) {
+    if (args.length === 0) {
+      return this.gen();
+    } else if (args.length === 1) {
+      if (typeof args[0] === "number") {
+        return this.genNumber(0, args[0]);
+      } else if (args[0] instanceof Vec2) {
+        return this.genVec2(vec2(0, 0), args[0]);
+      } else if (args[0] instanceof Color) {
+        return this.genColor(rgb(0, 0, 0), args[0]);
+      }
+    } else if (args.length === 2) {
+      if (typeof args[0] === "number" && typeof args[1] === "number") {
+        return this.genNumber(args[0], args[1]);
+      } else if (args[0] instanceof Vec2 && args[1] instanceof Vec2) {
+        return this.genVec2(args[0], args[1]);
+      } else if (args[0] instanceof Color && args[1] instanceof Color) {
+        return this.genColor(args[0], args[1]);
+      }
+    }
+  }
+};
+__name(RNG, "RNG");
+var defRNG = new RNG(Date.now());
+function randSeed(seed) {
+  if (seed != null) {
+    defRNG.seed = seed;
+  }
+  return defRNG.seed;
+}
+__name(randSeed, "randSeed");
+function rand(...args) {
+  return defRNG.genAny(...args);
+}
+__name(rand, "rand");
+function randi(...args) {
+  return Math.floor(rand(...args));
+}
+__name(randi, "randi");
+function chance(p) {
+  return rand() <= p;
+}
+__name(chance, "chance");
+function choose(list) {
+  return list[randi(list.length)];
+}
+__name(choose, "choose");
+function testRectRect2(r1, r2) {
+  return r1.pos.x + r1.width >= r2.pos.x && r1.pos.x <= r2.pos.x + r2.width && r1.pos.y + r1.height >= r2.pos.y && r1.pos.y <= r2.pos.y + r2.height;
+}
+__name(testRectRect2, "testRectRect2");
+function testRectRect(r1, r2) {
+  return r1.pos.x + r1.width > r2.pos.x && r1.pos.x < r2.pos.x + r2.width && r1.pos.y + r1.height > r2.pos.y && r1.pos.y < r2.pos.y + r2.height;
+}
+__name(testRectRect, "testRectRect");
+function testLineLineT(l1, l2) {
+  if (l1.p1.x === l1.p2.x && l1.p1.y === l1.p2.y || l2.p1.x === l2.p2.x && l2.p1.y === l2.p2.y) {
+    return null;
+  }
+  const denom = (l2.p2.y - l2.p1.y) * (l1.p2.x - l1.p1.x) - (l2.p2.x - l2.p1.x) * (l1.p2.y - l1.p1.y);
+  if (denom === 0) {
+    return null;
+  }
+  const ua = ((l2.p2.x - l2.p1.x) * (l1.p1.y - l2.p1.y) - (l2.p2.y - l2.p1.y) * (l1.p1.x - l2.p1.x)) / denom;
+  const ub = ((l1.p2.x - l1.p1.x) * (l1.p1.y - l2.p1.y) - (l1.p2.y - l1.p1.y) * (l1.p1.x - l2.p1.x)) / denom;
+  if (ua < 0 || ua > 1 || ub < 0 || ub > 1) {
+    return null;
+  }
+  return ua;
+}
+__name(testLineLineT, "testLineLineT");
+function testLineLine(l1, l2) {
+  const t = testLineLineT(l1, l2);
+  if (!t)
+    return null;
+  return vec2(l1.p1.x + t * (l1.p2.x - l1.p1.x), l1.p1.y + t * (l1.p2.y - l1.p1.y));
+}
+__name(testLineLine, "testLineLine");
+function testRectLine(r, l) {
+  if (testRectPoint(r, Point.fromVec2(l.p1)) || testRectPoint(r, Point.fromVec2(l.p2))) {
+    return true;
+  }
+  const pts = r.points();
+  return !!testLineLine(l, new Line(pts[0], pts[1])) || !!testLineLine(l, new Line(pts[1], pts[2])) || !!testLineLine(l, new Line(pts[2], pts[3])) || !!testLineLine(l, new Line(pts[3], pts[0]));
+}
+__name(testRectLine, "testRectLine");
+function testRectPoint(r, pt) {
+  return pt.x > r.pos.x && pt.x < r.pos.x + r.width && pt.y > r.pos.y && pt.y < r.pos.y + r.height;
+}
+__name(testRectPoint, "testRectPoint");
+function testPolygonPoint(poly, pt) {
+  let c = false;
+  const p = poly.pts;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+    if (p[i].y > pt.y != p[j].y > pt.y && pt.x < (p[j].x - p[i].x) * (pt.y - p[i].y) / (p[j].y - p[i].y) + p[i].x) {
+      c = !c;
+    }
+  }
+  return c;
+}
+__name(testPolygonPoint, "testPolygonPoint");
+var Line = class {
+  constructor(p1, p2) {
+    this.p1 = p1;
+    this.p2 = p2;
+  }
+  transform(m) {
+    return new Line(m.multVec2(this.p1), m.multVec2(this.p2));
+  }
+  bbox() {
+    return Rect.fromPoints(this.p1, this.p2);
+  }
+};
+__name(Line, "Line");
+var Rect = class {
+  constructor(pos2, width, height) {
+    this.pos = pos2;
+    this.width = width;
+    this.height = height;
+  }
+  static fromPoints(p1, p2) {
+    return new Rect(p1.clone(), p2.x - p1.x, p2.y - p1.y);
+  }
+  center() {
+    return new Vec2(this.pos.x + this.width / 2, this.pos.y + this.height / 2);
+  }
+  points() {
+    return [
+      this.pos,
+      this.pos.add(this.width, 0),
+      this.pos.add(this.width, this.height),
+      this.pos.add(0, this.height)
+    ];
+  }
+  transform(m) {
+    return new Polygon(this.points().map((pt) => m.multVec2(pt)));
+  }
+  bbox() {
+    return new Rect(this.pos.clone(), this.width, this.height);
+  }
+};
+__name(Rect, "Rect");
+var Circle = class {
+  constructor(center, radius) {
+    this.center = center;
+    this.radius = radius;
+  }
+  transform(tr) {
+    return new Ellipse(this.center, this.radius, this.radius).transform(tr);
+  }
+  bbox() {
+    return Rect.fromPoints(this.center.sub(vec2(this.radius)), this.center.add(vec2(this.radius)));
+  }
+};
+__name(Circle, "Circle");
+var Ellipse = class {
+  constructor(center, rx, ry) {
+    this.center = center;
+    this.radiusX = rx;
+    this.radiusY = ry;
+  }
+  transform(tr) {
+    return new Ellipse(tr.multVec2(this.center), tr.m[0] * this.radiusX, tr.m[5] * this.radiusY);
+  }
+  bbox() {
+    return Rect.fromPoints(this.center.sub(vec2(this.radiusX, this.radiusY)), this.center.add(vec2(this.radiusX, this.radiusY)));
+  }
+};
+__name(Ellipse, "Ellipse");
+var Polygon = class {
+  constructor(pts) {
+    if (pts.length < 3) {
+      throw new Error("Polygons should have at least 3 vertices");
+    }
+    this.pts = pts;
+  }
+  transform(m) {
+    return new Polygon(this.pts.map((pt) => m.multVec2(pt)));
+  }
+  bbox() {
+    const p1 = vec2(Number.MAX_VALUE);
+    const p2 = vec2(-Number.MAX_VALUE);
+    for (const pt of this.pts) {
+      p1.x = Math.min(p1.x, pt.x);
+      p2.x = Math.max(p2.x, pt.x);
+      p1.y = Math.min(p1.y, pt.y);
+      p2.y = Math.max(p2.y, pt.y);
+    }
+    return Rect.fromPoints(p1, p2);
+  }
+};
+__name(Polygon, "Polygon");
+var Point = class {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+  static fromVec2(p) {
+    return new Point(p.x, p.y);
+  }
+  toVec2() {
+    return new Vec2(this.x, this.y);
+  }
+  transform(tr) {
+    return Point.fromVec2(tr.multVec2(this.toVec2()));
+  }
+  bbox() {
+    return new Rect(this.toVec2(), 0, 0);
+  }
+};
+__name(Point, "Point");
+function sat(p1, p2) {
+  let overlap = Number.MAX_VALUE;
+  let displacement = vec2(0);
+  for (const poly of [p1, p2]) {
+    for (let i = 0; i < poly.pts.length; i++) {
+      const a = poly.pts[i];
+      const b = poly.pts[(i + 1) % poly.pts.length];
+      const axisProj = b.sub(a).normal().unit();
+      let min1 = Number.MAX_VALUE;
+      let max1 = -Number.MAX_VALUE;
+      for (let j = 0; j < p1.pts.length; j++) {
+        const q = p1.pts[j].dot(axisProj);
+        min1 = Math.min(min1, q);
+        max1 = Math.max(max1, q);
+      }
+      let min2 = Number.MAX_VALUE;
+      let max2 = -Number.MAX_VALUE;
+      for (let j = 0; j < p2.pts.length; j++) {
+        const q = p2.pts[j].dot(axisProj);
+        min2 = Math.min(min2, q);
+        max2 = Math.max(max2, q);
+      }
+      const o = Math.min(max1, max2) - Math.max(min1, min2);
+      if (o < 0) {
+        return null;
+      }
+      if (o < Math.abs(overlap)) {
+        const o1 = max2 - min1;
+        const o2 = min2 - max1;
+        overlap = Math.abs(o1) < Math.abs(o2) ? o1 : o2;
+        displacement = axisProj.scale(overlap);
+      }
+    }
+  }
+  return displacement;
+}
+__name(sat, "sat");
+
+// kasocket/server/kaboom/index.ts
+var KaboomObject = class {
+  constructor(name, args, properties = {}) {
+    this.__functionName = name;
+    this.__arguments = args;
+    this.__properties = properties;
+    return new Proxy(this, {
+      get(object, property) {
+        if (property == "__functionName" || property == "__arguments" || property == "__properties")
+          return object[property];
+        return object.__properties[property];
+      }
+    });
+  }
+};
+__name(KaboomObject, "KaboomObject");
+var add = /* @__PURE__ */ __name((comps) => {
+  const props = {};
+  for (const comp of comps) {
+    for (const prop in comp.__properties) {
+      props[prop] = comp.__properties[prop];
+    }
+  }
+  return new KaboomObject("add", [comps], props);
+}, "add");
+var rect = /* @__PURE__ */ __name((width, length) => new KaboomObject("rect", [width, length], { width, length }), "rect");
+var circle = /* @__PURE__ */ __name((radius) => new KaboomObject("circle", [radius], { radius }), "circle");
+var pos = /* @__PURE__ */ __name((x, y) => new KaboomObject("pos", [x, y], { pos: { x, y } }), "pos");
+var rotate = /* @__PURE__ */ __name((angle) => new KaboomObject("rotate", [angle], { angle }), "rotate");
+var scale = /* @__PURE__ */ __name((x, y) => new KaboomObject("scale", [x, y], { scale: { x, y } }), "scale");
+var color = /* @__PURE__ */ __name((...args) => {
+  let color2 = rgb(...args);
+  if (args.length == 1 && args[0] instanceof Color) {
+    color2 = new KaboomObject("rgb", [args[0].r, args[0].g, args[0].b], args[0]);
+  }
+  return new KaboomObject("color", [color2], { color: color2 });
+}, "color");
+var opacity = /* @__PURE__ */ __name((opacity2) => new KaboomObject("opacity", [opacity2], { opacity: opacity2 }), "opacity");
+var g = global;
+function Kaboom({
+  global: global2 = true
+} = {}) {
+  const obj = {
+    add,
+    rect,
+    circle,
+    pos,
+    rotate,
+    scale,
+    color,
+    opacity,
+    RED: Color.RED,
+    GREEN: Color.GREEN,
+    BLUE: Color.BLUE,
+    YELLOW: Color.YELLOW,
+    MAGENTA: Color.MAGENTA,
+    CYAN: Color.CYAN,
+    WHITE: Color.WHITE,
+    BLACK: Color.BLACK,
+    sat,
+    vec2,
+    vec3,
+    Vec3,
+    Rect,
+    Point,
+    Polygon,
+    Line,
+    Circle,
+    Vec2,
+    Mat4,
+    Quad,
+    RNG,
+    quad,
+    rad2deg,
+    deg2rad,
+    rgb,
+    hsl2rgb,
+    rand,
+    randi,
+    randSeed,
+    chance,
+    choose,
+    clamp,
+    lerp,
+    map,
+    mapc,
+    wave,
+    testLineLine,
+    testRectRect,
+    testRectRect2,
+    testRectLine,
+    testRectPoint,
+    testPolygonPoint
+  };
+  if (global2) {
+    for (const v in obj) {
+      g[v] = obj[v];
+    }
+  }
+  return obj;
+}
+__name(Kaboom, "Kaboom");
+
+// kasocket/message.ts
 var Message = class {
   constructor(name, data) {
     this.name = name;
     this.data = data;
     this.time = Date.now();
   }
-  static bundleOperations(deltaTime, operations) {
+  static BundleOperations(deltaTime, operations) {
     if (!Array.isArray(operations))
       operations = [operations];
     return JSON.stringify(new Message("_", { operations, deltaTime }));
   }
-  static fromString(str) {
+  static Parse(str) {
     const parsed = JSON.parse(str);
     return new Message(parsed.name, parsed.data);
   }
-  static toString(name, data) {
+  static Create(name, data) {
     return JSON.stringify(new Message(name, data));
   }
 };
 __name(Message, "Message");
 
-// kasocket/types/operation.ts
+// kasocket/operation.ts
 var MutateClient = /* @__PURE__ */ __name((mutation) => __spreadValues({
   operation: "mut"
 }, mutation), "MutateClient");
@@ -2795,19 +3953,39 @@ var Initialize = /* @__PURE__ */ __name((init) => __spreadValues({
   operation: "init"
 }, init), "Initialize");
 
-// kasocket/index.ts
+// kasocket/server/clientInterface.ts
+function Classify(value) {
+  if (typeof value != "object" || value == null)
+    return { value, type: "value" };
+  if (value instanceof KaboomObject) {
+    return {
+      name: value.__functionName,
+      args: Classify(value.__arguments),
+      type: "kaboom"
+    };
+  }
+  if (Array.isArray(value)) {
+    return { values: value.map((x) => Classify(x)), type: "array" };
+  }
+  const ret = { properties: {}, type: "object" };
+  for (const prop in value) {
+    ret.properties[prop] = Classify(value[prop]);
+  }
+  return ret;
+}
+__name(Classify, "Classify");
+
+// kasocket/server/index.ts
+var import_nanotimer = __toESM(require_nanotimer());
 var ClientObject = class {
-  constructor(ws, id, data) {
+  constructor(ws, id) {
     this.public = {};
     this.private = {};
-    data = JSON.parse(JSON.stringify(data));
     this.ws = ws;
     this.id = id;
-    this.public = data.public;
-    this.private = data.private;
   }
   sendMessage(name, data) {
-    const message = Message.toString(name, data);
+    const message = Message.Create(name, data);
     this.ws.send(message, (err) => {
       if (err)
         throw err;
@@ -2815,10 +3993,6 @@ var ClientObject = class {
   }
 };
 __name(ClientObject, "ClientObject");
-var InitialClientData = {
-  public: {},
-  private: {}
-};
 var Server = class {
   constructor(server, {
     path = "/multiplayer",
@@ -2835,21 +4009,20 @@ var Server = class {
       let id = "";
       while (!id || this.clients.has(id))
         id = Math.floor(Math.random() * uuidMax).toString(16);
-      ws.id = id;
-      const client = new ClientObject(ws, id, InitialClientData);
+      const client = new ClientObject(ws, id);
       this.applyMutationProxy(client);
       this.clients.set(id, client);
       const parsedClients = {};
       for (const [clientID, clientObj] of this.clients) {
-        parsedClients[clientID] = clientObj.public;
+        parsedClients[clientID] = Classify(clientObj.public);
       }
       this.addOperation(Initialize({
         time: Date.now(),
         id,
         clients: parsedClients,
         clientData: {
-          public: client.public,
-          private: client.private
+          public: Classify(client.public),
+          private: Classify(client.private)
         }
       }), {
         clusivity: "include",
@@ -2858,29 +4031,38 @@ var Server = class {
       this.addOperation(CreateClient({
         time: Date.now(),
         id,
-        client: client.public
+        client: Classify(client.public)
       }), {
         clusivity: "exclude",
         users: /* @__PURE__ */ new Set([id])
       });
+      if (this.connectionEvent) {
+        this.connectionEvent(client);
+      }
       ws.on("message", (msgStr) => {
-        const message = Message.fromString(msgStr);
+        const message = Message.Parse(msgStr);
         if (Date.now() - message.time > 3e3)
           return;
         if (message.name == "_") {
-          for (const operation of message.data) {
-            this.handleOperation(operation, ws.id, Date.now());
+          for (const operation of message.data.operations) {
+            this.handleOperation(operation, id, Date.now());
           }
         }
         const eventList = this.events.get(message.name);
         if (!eventList)
           return;
         for (const event of eventList) {
-          event(message.data, this.clients.get(ws.id));
+          event(message.data, this.clients.get(id));
         }
       });
     });
-    this.updateInterval = setInterval(() => this.update(), 1e3 / tps);
+    new import_nanotimer.default().setInterval(this.update.bind(this), [], "50m");
+  }
+  onConnect(callback) {
+    this.connectionEvent = callback;
+  }
+  onUpdate(callback) {
+    this.updateEvent = callback;
   }
   on(name, callback) {
     const eventList = this.events.get(name);
@@ -2894,7 +4076,7 @@ var Server = class {
     const client = this.clients.get(clientID);
     if (!client)
       throw new ReferenceError(`Client '${clientID}' does not exist!`);
-    const message = Message.toString(name, data);
+    const message = Message.Create(name, data);
     client.ws.send(message, (err) => {
       if (err)
         throw err;
@@ -2904,7 +4086,7 @@ var Server = class {
     if (name == "_") {
       throw new Error(`Websocket messages named '_' are reserved for native Kasocket operations`);
     }
-    const message = Message.toString(name, data);
+    const message = Message.Create(name, data);
     for (const client of this.clients.values()) {
       client.ws.send(message);
     }
@@ -2914,22 +4096,23 @@ var Server = class {
       const client = this.clients.get(senderID);
       if (!client)
         throw new ReferenceError(`Client ${senderID} does not exist`);
-      let obj = client.public;
+      let obj = client[data.instance];
       for (const prop of data.path)
         obj = obj[prop];
       if (data.instruction == "set")
         obj[data.property] = data.value;
       if (data.instruction == "delete")
         delete obj[data.property];
-      if (data.instance === "private")
+      if (data.instance != "public")
         return;
       return this.addOperation(MutateClient({
         time,
         id: senderID,
         instruction: data.instruction,
+        instance: "public",
         path: data.path,
         property: data.property,
-        value: data.value
+        value: Classify(data.value)
       }), {
         clusivity: "exclude",
         users: /* @__PURE__ */ new Set([senderID])
@@ -2980,9 +4163,11 @@ var Server = class {
   update() {
     this.deltaTime = (Date.now() - this.lastFrame) / 1e3;
     this.lastFrame = Date.now();
+    console.log(this.deltaTime);
+    this.updateEvent();
     for (const [id, client] of this.clients) {
       let updateArr = this.clientUpdates.get(id);
-      client.ws.send(Message.bundleOperations(this.deltaTime, updateArr || []));
+      client.ws.send(Message.BundleOperations(this.deltaTime, updateArr || []));
     }
     this.clientUpdates = /* @__PURE__ */ new Map();
   }
@@ -2990,14 +4175,49 @@ var Server = class {
     const t = this;
     function recurseProxy(obj, instance, path) {
       return new Proxy(obj, {
+        get(object, property) {
+          if (property == "__isProxy")
+            return true;
+          if (object instanceof KaboomObject) {
+            if (property == "__functionName" || property == "__arguments" || property == "__properties") {
+              return object[property];
+            }
+            if (!import_util.default.types.isProxy(object.__properties)) {
+              object.__properties = recurseProxy(object.__properties, instance, path);
+            }
+            return object.__properties[property];
+          }
+          if (typeof object[property] != "object" || object[property] === null) {
+            return object[property];
+          }
+          if (import_util.default.types.isProxy(object))
+            return object[property];
+          return recurseProxy(object[property], instance, [...path, property]);
+        },
         set(object, property, value) {
           object[property] = value;
           t.addOperation(MutateClient({
             id: client.id,
             path,
             instruction: "set",
+            instance,
             property,
-            value,
+            value: Classify(value),
+            time: Date.now()
+          }), instance == "private" ? {
+            clusivity: "include",
+            users: /* @__PURE__ */ new Set([client.id])
+          } : void 0);
+          return true;
+        },
+        deleteProperty(object, property) {
+          delete object[property];
+          t.addOperation(MutateClient({
+            id: client.id,
+            path,
+            instruction: "delete",
+            instance,
+            property,
             time: Date.now()
           }), instance == "private" ? {
             clusivity: "include",
@@ -3015,6 +4235,6 @@ var Server = class {
 __name(Server, "Server");
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  InitialClientData,
+  Kaboom,
   Server
 });
