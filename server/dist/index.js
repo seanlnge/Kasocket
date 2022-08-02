@@ -3077,7 +3077,6 @@ __export(server_exports, {
   Server: () => Server
 });
 module.exports = __toCommonJS(server_exports);
-var import_util = __toESM(require("util"));
 
 // node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
@@ -3819,22 +3818,39 @@ __name(sat, "sat");
 
 // kasocket/server/kaboom/index.ts
 var KaboomObject = class {
-  constructor(name, args, properties = {}) {
+  constructor(name, args, properties) {
     this.__functionName = name;
     this.__arguments = args;
+    for (const prop in properties) {
+      if (typeof properties[prop] == "function") {
+        properties[prop] = properties[prop].bind(this);
+      }
+    }
     this.__properties = properties;
     return new Proxy(this, {
       get(object, property) {
-        if (property == "__functionName" || property == "__arguments" || property == "__properties")
+        if (property == "__functionName" || property == "__arguments" || property == "__properties" || property == "__proxyBind" || property == "__method") {
           return object[property];
+        }
         return object.__properties[property];
       }
     });
   }
+  __proxyBind() {
+    for (const prop in this.__properties) {
+      if (typeof this.__properties[prop] != "function")
+        continue;
+      this.__properties[prop] = this.__properties[prop].bind(this);
+    }
+  }
 };
 __name(KaboomObject, "KaboomObject");
 var add = /* @__PURE__ */ __name((comps) => {
-  const props = {};
+  const props = {
+    destroy() {
+      this.__method = { name: "destroy", args: [] };
+    }
+  };
   for (const comp of comps) {
     for (const prop in comp.__properties) {
       props[prop] = comp.__properties[prop];
@@ -3848,11 +3864,9 @@ var pos = /* @__PURE__ */ __name((x, y) => new KaboomObject("pos", [x, y], { pos
 var rotate = /* @__PURE__ */ __name((angle) => new KaboomObject("rotate", [angle], { angle }), "rotate");
 var scale = /* @__PURE__ */ __name((x, y) => new KaboomObject("scale", [x, y], { scale: { x, y } }), "scale");
 var color = /* @__PURE__ */ __name((...args) => {
-  let color2 = rgb(...args);
-  if (args.length == 1 && args[0] instanceof Color) {
-    color2 = new KaboomObject("rgb", [args[0].r, args[0].g, args[0].b], args[0]);
-  }
-  return new KaboomObject("color", [color2], { color: color2 });
+  const prototype = args.length == 1 && args[0] instanceof Color ? args[0] : rgb(...args);
+  const kobj = new KaboomObject("rgb", [prototype.r, prototype.g, prototype.b], prototype);
+  return new KaboomObject("color", [kobj], { color: kobj });
 }, "color");
 var opacity = /* @__PURE__ */ __name((opacity2) => new KaboomObject("opacity", [opacity2], { opacity: opacity2 }), "opacity");
 var g = global;
@@ -3954,22 +3968,37 @@ var Initialize = /* @__PURE__ */ __name((init) => __spreadValues({
 }, init), "Initialize");
 
 // kasocket/server/clientInterface.ts
-function Classify(value) {
-  if (typeof value != "object" || value == null)
+function Classify(value, referenceMap) {
+  if (typeof value != "object" || value == null) {
     return { value, type: "value" };
+  }
+  const id = referenceMap.get(value);
+  if (id !== void 0)
+    return { id, type: "reference" };
+  const valueID = referenceMap.size;
+  referenceMap.set(value, valueID);
   if (value instanceof KaboomObject) {
     return {
       name: value.__functionName,
-      args: Classify(value.__arguments),
-      type: "kaboom"
+      args: Classify(value.__arguments, referenceMap),
+      type: "kaboom",
+      id: valueID
     };
   }
   if (Array.isArray(value)) {
-    return { values: value.map((x) => Classify(x)), type: "array" };
+    return {
+      values: value.map((x) => Classify(x, referenceMap)),
+      type: "array",
+      id: valueID
+    };
   }
-  const ret = { properties: {}, type: "object" };
+  const ret = {
+    properties: {},
+    type: "object",
+    id: valueID
+  };
   for (const prop in value) {
-    ret.properties[prop] = Classify(value[prop]);
+    ret.properties[prop] = Classify(value[prop], referenceMap);
   }
   return ret;
 }
@@ -3981,6 +4010,7 @@ var ClientObject = class {
   constructor(ws, id) {
     this.public = {};
     this.private = {};
+    this.referenceMap = /* @__PURE__ */ new Map();
     this.ws = ws;
     this.id = id;
   }
@@ -4004,7 +4034,21 @@ var Server = class {
     this.clientUpdates = /* @__PURE__ */ new Map();
     this.lastFrame = Date.now();
     this.deltaTime = 0;
-    this.socket = new import_websocket_server.default({ server, path });
+    this.socket = new import_websocket_server.default({ server, path, perMessageDeflate: {
+      zlibDeflateOptions: {
+        chunkSize: 1024,
+        memLevel: 7,
+        level: 3
+      },
+      zlibInflateOptions: {
+        chunkSize: 10 * 1024
+      },
+      clientNoContextTakeover: true,
+      serverNoContextTakeover: true,
+      serverMaxWindowBits: 10,
+      concurrencyLimit: 10,
+      threshold: 1024
+    } });
     this.socket.on("connection", (ws) => {
       let id = "";
       while (!id || this.clients.has(id))
@@ -4014,15 +4058,15 @@ var Server = class {
       this.clients.set(id, client);
       const parsedClients = {};
       for (const [clientID, clientObj] of this.clients) {
-        parsedClients[clientID] = Classify(clientObj.public);
+        parsedClients[clientID] = Classify(clientObj.public, client.referenceMap);
       }
       this.addOperation(Initialize({
         time: Date.now(),
         id,
         clients: parsedClients,
         clientData: {
-          public: Classify(client.public),
-          private: Classify(client.private)
+          public: Classify(client.public, client.referenceMap),
+          private: Classify(client.private, client.referenceMap)
         }
       }), {
         clusivity: "include",
@@ -4031,7 +4075,7 @@ var Server = class {
       this.addOperation(CreateClient({
         time: Date.now(),
         id,
-        client: Classify(client.public)
+        client: Classify(client.public, client.referenceMap)
       }), {
         clusivity: "exclude",
         users: /* @__PURE__ */ new Set([id])
@@ -4056,7 +4100,7 @@ var Server = class {
         }
       });
     });
-    new import_nanotimer.default().setInterval(this.update.bind(this), [], "50m");
+    new import_nanotimer.default().setInterval(this.update.bind(this), [], Math.round(1e3 / tps) + "m");
   }
   onConnect(callback) {
     this.connectionEvent = callback;
@@ -4097,8 +4141,11 @@ var Server = class {
       if (!client)
         throw new ReferenceError(`Client ${senderID} does not exist`);
       let obj = client[data.instance];
-      for (const prop of data.path)
+      for (const prop of data.path) {
         obj = obj[prop];
+        if (obj === void 0)
+          return;
+      }
       if (data.instruction == "set")
         obj[data.property] = data.value;
       if (data.instruction == "delete")
@@ -4112,7 +4159,7 @@ var Server = class {
         instance: "public",
         path: data.path,
         property: data.property,
-        value: Classify(data.value)
+        value: Classify(data.value, client.referenceMap)
       }), {
         clusivity: "exclude",
         users: /* @__PURE__ */ new Set([senderID])
@@ -4121,18 +4168,18 @@ var Server = class {
     throw new ReferenceError(`'${data.operation}' is not a valid Kasocket server operation`);
   }
   addOperation(operation, sendTo) {
-    for (const clientID of this.clients.keys()) {
+    for (const [id, _] of this.clients) {
       if (sendTo) {
-        const inUsers = sendTo.users.has(clientID);
+        const inUsers = sendTo.users.has(id);
         if (sendTo.clusivity == "include" && !inUsers)
           continue;
         if (sendTo.clusivity == "exclude" && inUsers)
           continue;
       }
-      const updateArr = this.clientUpdates.get(clientID);
+      const updateArr = this.clientUpdates.get(id);
       if (!updateArr) {
-        this.clientUpdates.set(clientID, [operation]);
-        return;
+        this.clientUpdates.set(id, [operation]);
+        continue;
       }
       for (let i = 0; i < updateArr.length; i++) {
         const op = updateArr[i];
@@ -4161,48 +4208,89 @@ var Server = class {
     }
   }
   update() {
-    this.deltaTime = (Date.now() - this.lastFrame) / 1e3;
-    this.lastFrame = Date.now();
-    console.log(this.deltaTime);
-    this.updateEvent();
-    for (const [id, client] of this.clients) {
-      let updateArr = this.clientUpdates.get(id);
-      client.ws.send(Message.BundleOperations(this.deltaTime, updateArr || []));
-    }
-    this.clientUpdates = /* @__PURE__ */ new Map();
+    return new Promise((res) => {
+      this.deltaTime = (Date.now() - this.lastFrame) / 1e3;
+      this.lastFrame = Date.now();
+      this.updateEvent();
+      for (const [id, client] of this.clients) {
+        let updateArr = this.clientUpdates.get(id);
+        client.ws.send(Message.BundleOperations(this.deltaTime, updateArr || []));
+      }
+      this.clientUpdates = /* @__PURE__ */ new Map();
+      res(true);
+    });
   }
   applyMutationProxy(client) {
     const t = this;
     function recurseProxy(obj, instance, path) {
-      return new Proxy(obj, {
-        get(object, property) {
-          if (property == "__isProxy")
+      if (obj instanceof KaboomObject) {
+        if ("__isProxy" in obj.__properties) {
+          obj.__properties.__changePath = path;
+        } else
+          obj.__properties = recurseProxy(obj.__properties, instance, path);
+      } else {
+        for (const prop in obj) {
+          if (typeof obj[prop] != "object")
+            continue;
+          if ("__isProxy" in obj[prop]) {
+            obj[prop].__changePath = [...path, prop];
+            continue;
+          }
+          obj[prop] = recurseProxy(obj[prop], instance, [...path, prop]);
+        }
+      }
+      const proxy = new Proxy(obj, {
+        has(object, property) {
+          if (property === "__isProxy")
             return true;
+          return property in object;
+        },
+        get(object, property) {
           if (object instanceof KaboomObject) {
-            if (property == "__functionName" || property == "__arguments" || property == "__properties") {
+            if (property == "__functionName" || property == "__arguments" || property == "__properties" || property == "__proxyBind" || property == "__method") {
               return object[property];
-            }
-            if (!import_util.default.types.isProxy(object.__properties)) {
-              object.__properties = recurseProxy(object.__properties, instance, path);
             }
             return object.__properties[property];
           }
-          if (typeof object[property] != "object" || object[property] === null) {
-            return object[property];
-          }
-          if (import_util.default.types.isProxy(object))
-            return object[property];
-          return recurseProxy(object[property], instance, [...path, property]);
+          return object[property];
         },
         set(object, property, value) {
-          object[property] = value;
+          if (property == "__changePath") {
+            if (path.length == value.length && path.every((v2, i) => value[i] === v2)) {
+              return true;
+            }
+            const v = object instanceof KaboomObject ? object.__properties : object;
+            path = value;
+            for (const prop in v) {
+              if (typeof v[prop] != "object")
+                continue;
+              v[prop].__changePath = [...path, prop];
+            }
+            return true;
+          }
+          if (!(object instanceof KaboomObject) || property != "__method") {
+            if (object[property] === value)
+              return true;
+            if (typeof value == "function") {
+              object[property] = value;
+              return true;
+            }
+            if (typeof value == "object") {
+              if ("__isProxy" in value) {
+                value.__changePath = [...path, property];
+              } else
+                value = recurseProxy(value, instance, [...path, property]);
+            }
+            object[property] = value;
+            value = Classify(value, client.referenceMap);
+          }
           t.addOperation(MutateClient({
             id: client.id,
             path,
             instruction: "set",
             instance,
             property,
-            value: Classify(value),
+            value,
             time: Date.now()
           }), instance == "private" ? {
             clusivity: "include",
@@ -4211,6 +4299,8 @@ var Server = class {
           return true;
         },
         deleteProperty(object, property) {
+          if (!(property in object))
+            return true;
           delete object[property];
           t.addOperation(MutateClient({
             id: client.id,
@@ -4226,6 +4316,9 @@ var Server = class {
           return true;
         }
       });
+      if (proxy instanceof KaboomObject)
+        proxy.__proxyBind();
+      return proxy;
     }
     __name(recurseProxy, "recurseProxy");
     client.public = recurseProxy(client.public, "public", []);

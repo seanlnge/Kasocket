@@ -1,4 +1,4 @@
-/* Port client kaboom to server code to send to client */
+/* Port client kaboom into interface for server */
 import {
 	sat,
 	vec2,
@@ -43,9 +43,19 @@ export class KaboomObject {
 	__arguments: any[];
     __properties: { [key: string]: any };
 
-    constructor(name: string, args: any[], properties: { [key: string]: any } = {}) {
+	// Set this value whenever calling method such as .destroy();
+	__method: { name: string, args: any[] } | undefined;
+
+    constructor(name: string, args: any[], properties: { [key: string]: any }) {
         this.__functionName = name;
         this.__arguments = args;
+
+		// Bind native methods to KaboomObject class
+		for(const prop in properties) {
+			if(typeof properties[prop] == 'function') {
+				properties[prop] = properties[prop].bind(this);
+			}
+		}
         this.__properties = properties;
 
 		// Return proxy bc Kaboom properties locked in this.__properties
@@ -54,17 +64,34 @@ export class KaboomObject {
 				if(property == '__functionName'
 				|| property == '__arguments'
 				|| property == '__properties'
-				) return object[property];
+				|| property == '__proxyBind'
+				|| property == '__method') {
+					return object[property];
+				}
 
 				return object.__properties[property];
 			}
 		});
     }
+
+	/**
+	 * Bind all properties `this` to proxy of self
+	 */
+	__proxyBind() {
+		for(const prop in this.__properties) {
+			if(typeof this.__properties[prop] != 'function') continue;
+			this.__properties[prop] = this.__properties[prop].bind(this);
+		}
+	}
 };
 
 const add = (comps: any[]) => {
+	// Methods binded to kaboom object in instantiation
+	const props = {
+		destroy() { this.__method = { name: 'destroy', args: [] } }
+	};
+
 	// Inherit properties from comps
-	const props = {};
 	for(const comp of comps) {
 		for(const prop in comp.__properties) {
 			props[prop] = comp.__properties[prop];
@@ -111,18 +138,20 @@ const scale = (x: number, y: number) => new KaboomObject(
 // Object's constructor gets obfuscated with JSON, and Kaboom needs Color constructor,
 // so store Color object in server, but send details to recreate object to client
 const color = (...args: any) => {
-	let color: any = rgb(...args); // sorry static typists
-	if(args.length == 1 && args[0] instanceof Color) {
-		color = new KaboomObject(
-			'rgb',
-			[args[0].r, args[0].g, args[0].b],
-			args[0]
-		);
-	}
+	const prototype: any = args.length == 1 && args[0] instanceof Color
+		? args[0]
+		: rgb(...args);
+		
+	const kobj = new KaboomObject(
+		'rgb',
+		[prototype.r, prototype.g, prototype.b],
+		prototype
+	);
+
 	return new KaboomObject(
 		'color',
-		[color],
-		{ color }
+		[kobj],
+		{ color: kobj }
 	);
 }
 
